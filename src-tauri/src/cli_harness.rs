@@ -335,8 +335,11 @@ fn run_grok(
 ) -> Result<String, String> {
     let prompt_path = temp_file("handy-grok-prompt", prompt)?;
 
+    // Grok's `-p/--single` requires a prompt value. Prefer `--prompt-file`
+    // alone for the structured one-shot; do not pass a bare `-p`.
     let mut args = vec![
-        "-p".to_string(),
+        "--prompt-file".to_string(),
+        path_to_string(&prompt_path),
         "--output-format".to_string(),
         "json".to_string(),
         "--json-schema".to_string(),
@@ -344,8 +347,6 @@ fn run_grok(
         "--max-turns".to_string(),
         "1".to_string(),
         "--disable-web-search".to_string(),
-        "--prompt-file".to_string(),
-        path_to_string(&prompt_path),
     ];
     if !model.trim().is_empty() {
         args.push("--model".to_string());
