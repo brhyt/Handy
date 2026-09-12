@@ -111,6 +111,16 @@ handy --start-hidden --no-tray
 > /Applications/Handy.app/Contents/MacOS/Handy --toggle-transcription
 > ```
 
+## DJI Mic button (macOS)
+
+A USB-connected DJI wireless receiver can start and stop Handy dictation. macOS sees that receiver as an audio device plus **consumer-control volume keys**, not as a dedicated “Link” keyboard button.
+
+**What works:** the receiver’s USB HID volume event (vendor `0x2CA3`; product IDs `0x4008` / `0x4011` are known, others can still match). On some DJI models the RX linking/connecting button is that event. Enable **Settings → General → DJI Mic button**. Prefer **Toggle** or **Auto** shortcut behavior. Grant Handy **Input Monitoring** if you do not want that button to change system volume.
+
+**What is not claimed:** the transmitter **Link** button as its own Mac HID control. A Mac with the RX on USB does not get a separate TX Link key. On some models (confirmed by others on Mic Mini 2) DJI forwards the TX linking press over the wireless link as the same RX volume HID — if Mic 2 does that, Handy will fire; this fork has not hardware-verified it. Bluetooth-only mode has no button events.
+
+See [docs/dji-mic-trigger.md](docs/dji-mic-trigger.md) for permissions, how to test which button is visible, and why this is implemented inside Handy instead of a LaunchAgent remapper.
+
 ## Known Issues & Current Limitations
 
 This project is actively being developed and has some [known issues](https://github.com/cjpais/Handy/issues). We believe in transparency about the current state:

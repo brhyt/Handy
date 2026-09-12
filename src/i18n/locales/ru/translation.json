@@ -227,6 +227,14 @@
           "push_to_talk": "Записывает, пока сочетание клавиш удерживается",
           "toggle": "Нажмите сочетание клавиш, чтобы начать запись, нажмите ещё раз, чтобы остановить"
         }
+      },
+      "djiMicTrigger": {
+        "label": "DJI Mic button",
+        "description": "On macOS, start and stop dictation with the DJI wireless receiver's USB button (the consumer volume event). Plug the receiver in over USB. The transmitter Link button is not a separate Mac HID button — it only works if the receiver forwards that press as this same volume event. Keyboard volume keys are unchanged. Input Monitoring is needed so the DJI button does not change system volume. Push-to-talk is a poor fit for a click-style button; use Toggle or Auto.",
+        "statusRunning": "Receiver button seen: {{device}}",
+        "statusWaiting": "Waiting for the USB receiver. Press the receiver button once to verify.",
+        "statusNoSwallow": "Trigger is active, but Input Monitoring is not granted — the button may also change system volume.",
+        "statusUnsupported": "DJI Mic button support is only available on macOS."
       }
     },
     "sound": {
