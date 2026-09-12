@@ -6,6 +6,7 @@ pub mod audio_toolkit;
 mod autostart;
 mod catalog;
 pub mod cli;
+mod cli_harness;
 mod clipboard;
 mod commands;
 mod dji_mic_trigger;
@@ -697,6 +698,10 @@ pub fn run(cli_args: CliArgs) {
             shortcut::update_verbatim_cues,
             shortcut::change_prompt_mode_sticky_enabled_setting,
             shortcut::change_prompt_mode_sticky_armed_setting,
+            shortcut::change_post_process_cli_binary_setting,
+            shortcut::change_post_process_cli_config_dir_setting,
+            shortcut::change_post_process_cli_timeout_setting,
+            shortcut::probe_post_process_cli,
             shortcut::update_custom_words,
             shortcut::suspend_all_bindings,
             shortcut::resume_all_bindings,
