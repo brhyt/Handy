@@ -207,6 +207,18 @@
           "push_to_talk": "Neemt op zolang je de sneltoets ingedrukt houdt",
           "toggle": "Tik op de sneltoets om de opname te starten, tik opnieuw om te stoppen"
         }
+      },
+      "djiMicTrigger": {
+        "label": "DJI Mic button",
+        "description": "On macOS, start and stop dictation with a short press of DJI Mic 2 transmitter Link. The USB receiver forwards that press as a consumer volume event. Plug the receiver into the Mac. Do not hold Link (pairing) and do not use TX Power (noise reduction) or Rec. Keyboard volume keys stay unchanged. Grant Input Monitoring so Link does not change system volume. Use Toggle or Auto, not Hold. Handy keeps Wireless Microphone RX open while this is on so Link does not re-init USB audio.",
+        "statusRunning": "Link/volume HID seen: {{device}}{{usage}}",
+        "statusWaiting": "Waiting for the USB receiver (Wireless Microphone RX). Plug the receiver into the Mac.",
+        "statusNoSwallow": "Trigger is active, but Input Monitoring is not granted — Link may also change system volume.",
+        "statusUnsupported": "DJI Mic button support is only available on macOS.",
+        "defaultDeviceName": "Wireless Microphone RX",
+        "statusButtonSeen": "Link/volume HID seen: {{device}}{{usage}}",
+        "statusReceiverReady": "USB receiver present ({{device}}). Short-press TX Link once to verify. Status updates when Handy sees the volume event.",
+        "statusWaitingReceiver": "Waiting for the USB receiver (Wireless Microphone RX). Plug the receiver into the Mac."
       }
     },
     "models": {

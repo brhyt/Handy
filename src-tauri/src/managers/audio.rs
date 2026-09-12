@@ -1029,9 +1029,13 @@ impl AudioRecordingManager {
                 *self.is_recording.lock().unwrap() = false;
                 self.set_state(&mut self.state.lock().unwrap(), RecordingState::Idle);
 
-                // In on-demand mode, close the mic (lazily if the setting is enabled)
+                // In on-demand mode, close the mic (lazily if the setting is enabled).
+                // Keep Wireless Microphone RX warm while the DJI Link trigger is on
+                // so the next press does not re-open the USB composite device.
                 if matches!(*self.mode.lock().unwrap(), MicrophoneMode::OnDemand) {
-                    if get_settings(&self.app_handle).lazy_stream_close {
+                    if self.should_keep_dji_receiver_warm() {
+                        debug!("Keeping DJI receiver microphone stream warm");
+                    } else if get_settings(&self.app_handle).lazy_stream_close {
                         self.schedule_lazy_close();
                     } else {
                         self.stop_microphone_stream();
@@ -1057,6 +1061,17 @@ impl AudioRecordingManager {
             _ => None,
         }
     }
+    fn should_keep_dji_receiver_warm(&self) -> bool {
+        let settings = get_settings(&self.app_handle);
+        if !settings.dji_mic_trigger_enabled {
+            return false;
+        }
+        settings.selected_microphone.as_deref().is_some_and(|name| {
+            let n = name.to_ascii_lowercase();
+            n.contains("wireless mic") || n.contains("dji mic")
+        })
+    }
+
     pub fn is_recording(&self) -> bool {
         // Lock-free: mirrors the `state` {Recording, Stopping} membership via
         // an atomic maintained by `set_state()`. Polled from the webview/main
@@ -1085,7 +1100,9 @@ impl AudioRecordingManager {
 
                 // In on-demand mode, close the mic (lazily if the setting is enabled)
                 if matches!(*self.mode.lock().unwrap(), MicrophoneMode::OnDemand) {
-                    if get_settings(&self.app_handle).lazy_stream_close {
+                    if self.should_keep_dji_receiver_warm() {
+                        debug!("Keeping DJI receiver microphone stream warm");
+                    } else if get_settings(&self.app_handle).lazy_stream_close {
                         self.schedule_lazy_close();
                     } else {
                         self.stop_microphone_stream();
