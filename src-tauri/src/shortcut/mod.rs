@@ -829,9 +829,20 @@ pub fn change_whats_new_last_seen_version_setting(
 
 #[tauri::command]
 #[specta::specta]
-pub fn update_custom_words(app: AppHandle, words: Vec<String>) -> Result<(), String> {
+pub fn update_custom_words(app: AppHandle, words: Vec<settings::CustomWord>) -> Result<(), String> {
     let mut settings = settings::get_settings(&app);
-    settings.custom_words = words;
+    settings.custom_words = words
+        .into_iter()
+        .filter_map(|word| {
+            let spoken = word.spoken.trim().to_string();
+            let written = word.written.trim().to_string();
+            if written.is_empty() {
+                None
+            } else {
+                Some(settings::CustomWord::pair(spoken, written))
+            }
+        })
+        .collect();
     settings::write_settings(&app, settings);
     Ok(())
 }

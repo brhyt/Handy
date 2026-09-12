@@ -378,10 +378,12 @@
       "customWords": {
         "title": "Parole personalizzate",
         "description": "Aiuta i modelli supportati a riconoscere nomi e termini specialistici. La correzione approssimativa è attualmente limitata alle parole che usano le lettere A–Z e i numeri.",
-        "placeholder": "Aggiungi una parola",
+        "spokenPlaceholder": "Sentito come",
+        "writtenPlaceholder": "Scrivere come",
         "add": "Aggiungi",
         "remove": "Rimuovi {{word}}",
-        "duplicate": "\"{{word}}\" esiste già"
+        "duplicate": "\"{{word}}\" esiste già",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "Rilevamento dell'attività vocale",

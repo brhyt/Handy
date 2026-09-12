@@ -378,10 +378,12 @@
       "customWords": {
         "title": "מילים מותאמות אישית",
         "description": "עזרו למודלים נתמכים לזהות שמות ומונחים מקצועיים. תיקון בקירוב מוגבל כרגע למילים המשתמשות באותיות A–Z ובמספרים.",
-        "placeholder": "הוסף מילה",
+        "spokenPlaceholder": "נשמע כמו",
+        "writtenPlaceholder": "נכתב כמו",
         "add": "הוסף",
         "remove": "הסר את {{word}}",
-        "duplicate": "\"{{word}}\" כבר קיימת"
+        "duplicate": "\"{{word}}\" כבר קיימת",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "זיהוי פעילות קולית",

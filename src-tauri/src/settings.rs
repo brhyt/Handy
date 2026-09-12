@@ -94,6 +94,63 @@ pub struct LLMPrompt {
     pub prompt: String,
 }
 
+/// A spoken → written custom-word pair.
+///
+/// Legacy stores saved a `string[]` of spellings. Those values still
+/// deserialize as pairs whose spoken form equals the written form, which
+/// preserves the old "fuzzy-match the spelling itself" behavior. An empty
+/// spoken form also matches against the written spelling.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Type)]
+pub struct CustomWord {
+    #[serde(default)]
+    pub spoken: String,
+    pub written: String,
+}
+
+impl CustomWord {
+    pub fn from_written(written: impl Into<String>) -> Self {
+        let written = written.into();
+        Self {
+            spoken: written.clone(),
+            written,
+        }
+    }
+
+    pub fn pair(spoken: impl Into<String>, written: impl Into<String>) -> Self {
+        Self {
+            spoken: spoken.into(),
+            written: written.into(),
+        }
+    }
+
+    pub fn as_match_pair(&self) -> (&str, &str) {
+        (self.spoken.as_str(), self.written.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for CustomWord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum RawCustomWord {
+            Legacy(String),
+            Pair {
+                #[serde(default)]
+                spoken: String,
+                written: String,
+            },
+        }
+
+        Ok(match RawCustomWord::deserialize(deserializer)? {
+            RawCustomWord::Legacy(word) => CustomWord::from_written(word),
+            RawCustomWord::Pair { spoken, written } => CustomWord { spoken, written },
+        })
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct PostProcessProvider {
     pub id: String,
@@ -426,7 +483,7 @@ pub struct AppSettings {
     #[serde(default = "default_log_level")]
     pub log_level: LogLevel,
     #[serde(default)]
-    pub custom_words: Vec<String>,
+    pub custom_words: Vec<CustomWord>,
     #[serde(default)]
     pub model_unload_timeout: ModelUnloadTimeout,
     #[serde(default = "default_word_correction_threshold")]
@@ -1000,6 +1057,27 @@ impl AppSettings {
             .iter_mut()
             .find(|provider| provider.id == provider_id)
     }
+
+    /// Written forms only — Whisper's initial prompt should bias toward the
+    /// desired spelling, not the spoken/misheard form we later rewrite.
+    pub fn custom_words_initial_prompt(&self) -> Option<String> {
+        let mut tokens = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for word in &self.custom_words {
+            let written = word.written.trim();
+            if written.is_empty() {
+                continue;
+            }
+            if seen.insert(written.to_ascii_lowercase()) {
+                tokens.push(written.to_string());
+            }
+        }
+        if tokens.is_empty() {
+            None
+        } else {
+            Some(tokens.join(", "))
+        }
+    }
 }
 
 /// Startup entry point. Same load-or-create/salvage/migrate behavior as
@@ -1395,6 +1473,45 @@ mod tests {
         // matching legacy mode rather than the new hold-or-toggle default.
         assert_eq!(settings.shortcut_activation, ShortcutActivation::Toggle);
         assert_eq!(settings.transcribe_gpu_device, None);
+        assert_eq!(
+            settings.custom_words,
+            vec![
+                CustomWord::from_written("Handy"),
+                CustomWord::from_written("cjpais"),
+            ]
+        );
+        assert_eq!(
+            settings.custom_words_initial_prompt().as_deref(),
+            Some("Handy, cjpais")
+        );
+    }
+
+    #[test]
+    fn custom_words_accept_spoken_written_pairs_and_legacy_strings() {
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "custom_words": [
+                "Handy",
+                { "spoken": "bright", "written": "Brhyt" },
+                { "written": "DJI" }
+            ]
+        }))
+        .expect("legacy strings and pair objects must both parse");
+
+        assert_eq!(
+            settings.custom_words,
+            vec![
+                CustomWord::from_written("Handy"),
+                CustomWord::pair("bright", "Brhyt"),
+                CustomWord {
+                    spoken: String::new(),
+                    written: "DJI".to_string(),
+                },
+            ]
+        );
+        assert_eq!(
+            settings.custom_words_initial_prompt().as_deref(),
+            Some("Handy, Brhyt, DJI")
+        );
     }
 
     #[test]
@@ -1435,7 +1552,10 @@ mod tests {
         let salvaged = salvage_settings(&stored);
         assert_eq!(salvaged.paste_delay_ms, default_paste_delay_ms());
         assert_eq!(salvaged.sound_theme, default_sound_theme());
-        assert_eq!(salvaged.custom_words, vec!["handy".to_string()]);
+        assert_eq!(
+            salvaged.custom_words,
+            vec![CustomWord::from_written("handy")]
+        );
     }
 
     #[test]

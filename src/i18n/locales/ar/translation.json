@@ -355,10 +355,12 @@
       "customWords": {
         "title": "كلمات مخصصة",
         "description": "ساعد النماذج المدعومة على التعرّف على الأسماء والمصطلحات المتخصصة. يقتصر التصحيح التقريبي حاليًا على الكلمات التي تستخدم الأحرف A–Z والأرقام.",
-        "placeholder": "أضف كلمة",
+        "spokenPlaceholder": "يُسمع كـ",
+        "writtenPlaceholder": "يُكتب كـ",
         "add": "إضافة",
         "remove": "إزالة {{word}}",
-        "duplicate": "\"{{word}}\" موجود بالفعل"
+        "duplicate": "\"{{word}}\" موجود بالفعل",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "كشف النشاط الصوتي",

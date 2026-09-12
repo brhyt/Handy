@@ -378,10 +378,12 @@
       "customWords": {
         "title": "Brugerdefinerede ord",
         "description": "Hjælp understøttede modeller med at genkende navne og specialiserede udtryk. Fuzzy-korrektion er i øjeblikket begrænset til ord, der bruger A-Z og tal.",
-        "placeholder": "Tilføj et ord",
+        "spokenPlaceholder": "Hørt som",
+        "writtenPlaceholder": "Skriv som",
         "add": "Tilføj",
         "remove": "Fjern {{word}}",
-        "duplicate": "\"{{word}}\" findes allerede"
+        "duplicate": "\"{{word}}\" findes allerede",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "Stemmeaktivitetsdetektion",

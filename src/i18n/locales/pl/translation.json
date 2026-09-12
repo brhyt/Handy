@@ -378,10 +378,12 @@
       "customWords": {
         "title": "Własne słowa",
         "description": "Pomóż obsługiwanym modelom rozpoznawać nazwy i specjalistyczne terminy. Korekta przybliżona jest obecnie ograniczona do słów używających liter A–Z i cyfr.",
-        "placeholder": "Dodaj słowo",
+        "spokenPlaceholder": "Słyszane jako",
+        "writtenPlaceholder": "Zapisywane jako",
         "add": "Dodaj",
         "remove": "Usuń {{word}}",
-        "duplicate": "\"{{word}}\" już istnieje"
+        "duplicate": "\"{{word}}\" już istnieje",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "Wykrywanie aktywności głosowej",

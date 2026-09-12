@@ -25,9 +25,14 @@ fn build_match_key(word: &str) -> String {
 struct CustomWordMatchKey {
     word_index: usize,
     key: String,
+    use_exact_written: bool,
 }
 
-fn build_custom_word_match_keys(word: &str, word_index: usize) -> Vec<CustomWordMatchKey> {
+fn build_custom_word_match_keys(
+    word: &str,
+    word_index: usize,
+    use_exact_written: bool,
+) -> Vec<CustomWordMatchKey> {
     let primary_key = build_match_key(word);
     let mut keys = Vec::with_capacity(2);
 
@@ -39,6 +44,7 @@ fn build_custom_word_match_keys(word: &str, word_index: usize) -> Vec<CustomWord
         keys.push(CustomWordMatchKey {
             word_index,
             key: primary_key.clone(),
+            use_exact_written,
         });
     }
 
@@ -48,10 +54,33 @@ fn build_custom_word_match_keys(word: &str, word_index: usize) -> Vec<CustomWord
             keys.push(CustomWordMatchKey {
                 word_index,
                 key: expanded_key,
+                use_exact_written,
             });
         }
     }
 
+    keys
+}
+
+fn build_pair_match_keys(
+    spoken: &str,
+    written: &str,
+    word_index: usize,
+) -> Vec<CustomWordMatchKey> {
+    let spoken = spoken.trim();
+    let written = written.trim();
+    if written.is_empty() {
+        return Vec::new();
+    }
+
+    let remapping = !spoken.is_empty() && !spoken.eq_ignore_ascii_case(written);
+    let mut keys = Vec::new();
+    if remapping {
+        keys.extend(build_custom_word_match_keys(spoken, word_index, true));
+    }
+    // Always match the written form so already-correct output is preserved
+    // and empty/same spoken keeps legacy spelling-only fuzzy matching.
+    keys.extend(build_custom_word_match_keys(written, word_index, false));
     keys
 }
 
@@ -70,23 +99,25 @@ fn supports_soundex(key: &str) -> bool {
 ///
 /// # Arguments
 /// * `candidate` - The cleaned/lowercased candidate string to match
-/// * `custom_words` - Original custom words (for returning the replacement)
-/// * `custom_word_match_keys` - Normalized custom-word keys for comparison
+/// * `replacements` - Written forms to substitute on a match
+/// * `custom_word_match_keys` - Normalized spoken/written keys for comparison
 /// * `threshold` - Maximum similarity score to accept
 ///
 /// # Returns
-/// The best matching custom word and its score, if any match was found
+/// The best matching written form, its score, and whether to keep that
+/// written form exactly (spoken → written remapping) rather than
+/// preserving the transcript's case pattern.
 fn find_best_match<'a>(
     candidate: &str,
-    custom_words: &'a [String],
+    replacements: &'a [String],
     custom_word_match_keys: &[CustomWordMatchKey],
     threshold: f64,
-) -> Option<(&'a String, f64)> {
+) -> Option<(&'a str, f64, bool)> {
     if !is_supported_fuzzy_key(candidate) || candidate.chars().count() > 50 {
         return None;
     }
 
-    let mut best_match: Option<&String> = None;
+    let mut best_match: Option<(&str, bool)> = None;
     let mut best_score = f64::MAX;
 
     for custom_word_key in custom_word_match_keys {
@@ -125,12 +156,15 @@ fn find_best_match<'a>(
 
         // Accept if the score is good enough (configurable threshold)
         if combined_score < threshold && combined_score < best_score {
-            best_match = Some(&custom_words[custom_word_key.word_index]);
+            best_match = Some((
+                replacements[custom_word_key.word_index].as_str(),
+                custom_word_key.use_exact_written,
+            ));
             best_score = combined_score;
         }
     }
 
-    best_match.map(|m| (m, best_score))
+    best_match.map(|(replacement, use_exact_written)| (replacement, best_score, use_exact_written))
 }
 
 /// Applies custom word corrections to transcribed text using fuzzy matching
@@ -143,21 +177,28 @@ fn find_best_match<'a>(
 ///
 /// # Arguments
 /// * `text` - The input text to correct
-/// * `custom_words` - List of custom words to match against
+/// * `custom_words` - Spoken → written pairs. Empty spoken matches the written
+///   spelling (legacy behavior). Distinct spoken forms are fuzzy-matched and
+///   replaced with the written form exactly.
 /// * `threshold` - Maximum similarity score to accept (0.0 = exact match, 1.0 = any match)
 ///
 /// # Returns
 /// The corrected text with custom words applied
-pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -> String {
+pub fn apply_custom_words(text: &str, custom_words: &[(&str, &str)], threshold: f64) -> String {
     if custom_words.is_empty() {
         return text.to_string();
     }
+
+    let replacements: Vec<String> = custom_words
+        .iter()
+        .map(|(_, written)| written.trim().to_string())
+        .collect();
 
     // Pre-compute normalized comparison keys to avoid repeated allocations.
     let custom_word_match_keys: Vec<CustomWordMatchKey> = custom_words
         .iter()
         .enumerate()
-        .flat_map(|(index, word)| build_custom_word_match_keys(word, index))
+        .flat_map(|(index, (spoken, written))| build_pair_match_keys(spoken, written, index))
         .collect();
 
     let words: Vec<&str> = text.split_whitespace().collect();
@@ -165,7 +206,7 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
     let mut i = 0;
 
     while i < words.len() {
-        let mut best_match: Option<(usize, &String, f64)> = None;
+        let mut best_match: Option<(usize, &str, f64, bool)> = None;
 
         // Consider n-grams up to three words and choose the closest match. A
         // longest-first match can consume a following ordinary word when both
@@ -187,26 +228,31 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
             }
             let ngram = build_ngram(ngram_words);
 
-            if let Some((replacement, score)) =
-                find_best_match(&ngram, custom_words, &custom_word_match_keys, threshold)
+            if let Some((replacement, score, use_exact_written)) =
+                find_best_match(&ngram, &replacements, &custom_word_match_keys, threshold)
             {
                 let is_better = best_match
                     .as_ref()
-                    .is_none_or(|(_, _, best_score)| score < *best_score);
+                    .is_none_or(|(_, _, best_score, _)| score < *best_score);
                 if is_better {
-                    best_match = Some((n, replacement, score));
+                    best_match = Some((n, replacement, score, use_exact_written));
                 }
             }
         }
 
-        if let Some((n, replacement, _)) = best_match {
+        if let Some((n, replacement, _, use_exact_written)) = best_match {
             let ngram_words = &words[i..i + n];
             // Extract punctuation from first and last words of the n-gram.
             let (prefix, _) = extract_punctuation(ngram_words[0]);
             let (_, suffix) = extract_punctuation(ngram_words[n - 1]);
 
-            // Preserve case from first word.
-            let corrected = preserve_case_pattern(ngram_words[0], replacement);
+            // Spoken → written remaps keep the user's written spelling.
+            // Spelling-only entries still follow the transcript's case.
+            let corrected = if use_exact_written {
+                replacement.to_string()
+            } else {
+                preserve_case_pattern(ngram_words[0], replacement)
+            };
 
             result.push(format!("{}{}{}", prefix, corrected, suffix));
             i += n;
@@ -437,6 +483,10 @@ pub fn normalize_transcription_output(text: &str) -> String {
 mod tests {
     use super::*;
 
+    fn spelling<'a>(words: &'a [&'a str]) -> Vec<(&'a str, &'a str)> {
+        words.iter().copied().map(|word| (word, word)).collect()
+    }
+
     /// Exercise the complete cleanup sequence with an explicitly selected
     /// language. Individual tests below predate the split between filler
     /// removal and non-filler normalization.
@@ -453,7 +503,7 @@ mod tests {
     #[test]
     fn test_apply_custom_words_exact_match() {
         let text = "hello world";
-        let custom_words = vec!["Hello".to_string(), "World".to_string()];
+        let custom_words = spelling(&["Hello", "World"]);
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert_eq!(result, "Hello World");
     }
@@ -461,7 +511,7 @@ mod tests {
     #[test]
     fn test_apply_custom_words_fuzzy_match() {
         let text = "helo wrold";
-        let custom_words = vec!["hello".to_string(), "world".to_string()];
+        let custom_words = spelling(&["hello", "world"]);
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert_eq!(result, "hello world");
     }
@@ -490,7 +540,7 @@ mod tests {
     #[test]
     fn test_empty_custom_words() {
         let text = "hello world";
-        let custom_words = vec![];
+        let custom_words: Vec<(&str, &str)> = vec![];
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert_eq!(result, "hello world");
     }
@@ -732,7 +782,7 @@ mod tests {
     #[test]
     fn test_apply_custom_words_ngram_two_words() {
         let text = "il cui nome è Charge B, che permette";
-        let custom_words = vec!["ChargeBee".to_string()];
+        let custom_words = spelling(&["ChargeBee"]);
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert!(result.contains("ChargeBee,"), "unexpected result: {result}");
         assert!(!result.contains("Charge B"));
@@ -741,7 +791,7 @@ mod tests {
     #[test]
     fn test_apply_custom_words_ngram_three_words() {
         let text = "use Chat G P T for this";
-        let custom_words = vec!["ChatGPT".to_string()];
+        let custom_words = spelling(&["ChatGPT"]);
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert!(result.contains("ChatGPT"));
     }
@@ -749,7 +799,7 @@ mod tests {
     #[test]
     fn test_apply_custom_words_prefers_longer_ngram() {
         let text = "Open AI GPT model";
-        let custom_words = vec!["OpenAI".to_string(), "GPT".to_string()];
+        let custom_words = spelling(&["OpenAI", "GPT"]);
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert_eq!(result, "OpenAI GPT model");
     }
@@ -757,7 +807,7 @@ mod tests {
     #[test]
     fn test_apply_custom_words_ngram_preserves_case() {
         let text = "CHARGE B is great";
-        let custom_words = vec!["ChargeBee".to_string()];
+        let custom_words = spelling(&["ChargeBee"]);
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert!(result.contains("CHARGEBEE"));
     }
@@ -766,7 +816,7 @@ mod tests {
     fn test_apply_custom_words_ngram_with_spaces_in_custom() {
         // Custom word with space should also match against split words
         let text = "using Mac Book Pro";
-        let custom_words = vec!["MacBook Pro".to_string()];
+        let custom_words = spelling(&["MacBook Pro"]);
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert_eq!(result, "using MacBook Pro");
     }
@@ -776,7 +826,7 @@ mod tests {
         // Verify that trailing non-alpha chars (like numbers) aren't double-counted
         // between build_ngram stripping them and extract_punctuation capturing them
         let text = "use GPT4 for this";
-        let custom_words = vec!["GPT-4".to_string()];
+        let custom_words = spelling(&["GPT-4"]);
         let result = apply_custom_words(text, &custom_words, 0.5);
         // Should NOT produce "GPT-44" (double-counting the trailing 4)
         assert!(
@@ -789,7 +839,7 @@ mod tests {
     #[test]
     fn test_apply_custom_words_matches_ampersand_word() {
         let text = "send it to RD for review";
-        let custom_words = vec!["R&D".to_string()];
+        let custom_words = spelling(&["R&D"]);
         let result = apply_custom_words(text, &custom_words, 0.18);
         assert_eq!(result, "send it to R&D for review");
     }
@@ -797,7 +847,7 @@ mod tests {
     #[test]
     fn test_apply_custom_words_matches_spoken_ampersand_word() {
         let text = "send it to R and D for review";
-        let custom_words = vec!["R&D".to_string()];
+        let custom_words = spelling(&["R&D"]);
         let result = apply_custom_words(text, &custom_words, 0.18);
         assert_eq!(result, "send it to R&D for review");
     }
@@ -805,7 +855,7 @@ mod tests {
     #[test]
     fn test_apply_custom_words_preserves_ampersand_word() {
         let text = "send it to R&D for review";
-        let custom_words = vec!["R&D".to_string()];
+        let custom_words = spelling(&["R&D"]);
         let result = apply_custom_words(text, &custom_words, 0.18);
         assert_eq!(result, "send it to R&D for review");
     }
@@ -813,7 +863,7 @@ mod tests {
     #[test]
     fn test_apply_custom_words_handles_unicode_punctuation() {
         let text = "「Handee。」";
-        let custom_words = vec!["Handy".to_string()];
+        let custom_words = spelling(&["Handy"]);
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert_eq!(result, "「Handy。」");
     }
@@ -821,8 +871,43 @@ mod tests {
     #[test]
     fn test_apply_custom_words_skips_cjk_fuzzy_matching() {
         let text = "你好。";
-        let custom_words = vec!["你号".to_string()];
+        let custom_words = spelling(&["你号"]);
         let result = apply_custom_words(text, &custom_words, 1.0);
         assert_eq!(result, text);
+    }
+
+    #[test]
+    fn test_apply_custom_words_rewrites_spoken_to_written() {
+        let text = "hello bright, how are you";
+        let result = apply_custom_words(text, &[("bright", "Brhyt")], 0.5);
+        assert_eq!(result, "hello Brhyt, how are you");
+    }
+
+    #[test]
+    fn test_apply_custom_words_spoken_remap_keeps_written_case() {
+        let text = "BRIGHT is here";
+        let result = apply_custom_words(text, &[("bright", "Brhyt")], 0.5);
+        assert_eq!(result, "Brhyt is here");
+    }
+
+    #[test]
+    fn test_apply_custom_words_preserves_already_written_form() {
+        let text = "I use Brhyt daily";
+        let result = apply_custom_words(text, &[("bright", "Brhyt")], 0.5);
+        assert_eq!(result, "I use Brhyt daily");
+    }
+
+    #[test]
+    fn test_apply_custom_words_empty_spoken_matches_written() {
+        let text = "helo there";
+        let result = apply_custom_words(text, &[("", "hello")], 0.5);
+        assert_eq!(result, "hello there");
+    }
+
+    #[test]
+    fn test_apply_custom_words_fuzzy_spoken_form() {
+        let text = "the name brigt showed up";
+        let result = apply_custom_words(text, &[("bright", "Brhyt")], 0.5);
+        assert_eq!(result, "the name Brhyt showed up");
     }
 }
