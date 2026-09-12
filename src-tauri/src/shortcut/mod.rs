@@ -1215,6 +1215,10 @@ pub async fn fetch_post_process_models(
         .find(|p| p.id == provider_id)
         .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
 
+    if crate::cli_harness::is_cli_provider(&provider.id) {
+        return Ok(Vec::new());
+    }
+
     if provider.id == APPLE_INTELLIGENCE_PROVIDER_ID {
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {
@@ -1258,6 +1262,69 @@ pub fn set_post_process_selected_prompt(app: AppHandle, id: String) -> Result<()
     settings.post_process_selected_prompt_id = Some(id);
     settings::write_settings(&app, settings);
     Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_post_process_cli_binary_setting(
+    app: AppHandle,
+    provider_id: String,
+    binary_path: String,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings
+        .post_process_cli_settings_mut(&provider_id)?
+        .binary_path = binary_path;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_post_process_cli_config_dir_setting(
+    app: AppHandle,
+    provider_id: String,
+    config_dir: String,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings
+        .post_process_cli_settings_mut(&provider_id)?
+        .config_dir = config_dir;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_post_process_cli_timeout_setting(
+    app: AppHandle,
+    provider_id: String,
+    timeout_secs: u64,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings
+        .post_process_cli_settings_mut(&provider_id)?
+        .timeout_secs = crate::cli_harness::clamp_timeout_secs(timeout_secs);
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn probe_post_process_cli(
+    app: AppHandle,
+    provider_id: String,
+) -> Result<crate::cli_harness::CliHarnessStatus, String> {
+    let settings = settings::get_settings(&app);
+    if !settings
+        .post_process_providers
+        .iter()
+        .any(|provider| provider.id == provider_id && provider.is_cli())
+    {
+        return Err(format!("CLI provider '{provider_id}' not found"));
+    }
+    let cli_settings = settings.post_process_cli_settings(&provider_id);
+    Ok(crate::cli_harness::probe(&provider_id, &cli_settings).await)
 }
 
 #[tauri::command]

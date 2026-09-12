@@ -50,6 +50,128 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
             {t("settings.postProcessing.api.appleIntelligence.unavailable")}
           </Alert>
         ) : null
+      ) : state.isCliProvider ? (
+        <>
+          <SettingContainer
+            title={t("settings.postProcessing.api.cli.binaryPath.title")}
+            description={t(
+              "settings.postProcessing.api.cli.binaryPath.description",
+            )}
+            descriptionMode="tooltip"
+            layout="horizontal"
+            grouped={true}
+          >
+            <Input
+              type="text"
+              defaultValue={state.cliBinaryPath}
+              key={`cli-binary:${state.selectedProviderId}:${state.cliBinaryPath}`}
+              onBlur={(event) =>
+                state.handleCliBinaryPathChange(event.target.value)
+              }
+              placeholder={t(
+                "settings.postProcessing.api.cli.binaryPath.placeholder",
+              )}
+              variant="compact"
+              disabled={state.isCliBinaryUpdating}
+              className="flex-1 min-w-[320px]"
+            />
+          </SettingContainer>
+
+          <SettingContainer
+            title={t("settings.postProcessing.api.cli.configDir.title")}
+            description={t(
+              "settings.postProcessing.api.cli.configDir.description",
+            )}
+            descriptionMode="tooltip"
+            layout="horizontal"
+            grouped={true}
+          >
+            <Input
+              type="text"
+              defaultValue={state.cliConfigDir}
+              key={`cli-config:${state.selectedProviderId}:${state.cliConfigDir}`}
+              onBlur={(event) =>
+                state.handleCliConfigDirChange(event.target.value)
+              }
+              placeholder={t(
+                "settings.postProcessing.api.cli.configDir.placeholder",
+              )}
+              variant="compact"
+              disabled={state.isCliConfigDirUpdating}
+              className="flex-1 min-w-[320px]"
+            />
+          </SettingContainer>
+
+          <SettingContainer
+            title={t("settings.postProcessing.api.cli.timeout.title")}
+            description={t(
+              "settings.postProcessing.api.cli.timeout.description",
+            )}
+            descriptionMode="tooltip"
+            layout="horizontal"
+            grouped={true}
+          >
+            <Input
+              type="number"
+              min={10}
+              max={600}
+              defaultValue={state.cliTimeoutSecs}
+              key={`cli-timeout:${state.selectedProviderId}:${state.cliTimeoutSecs}`}
+              onBlur={(event) => {
+                const parsed = Number.parseInt(event.target.value, 10);
+                if (Number.isFinite(parsed)) {
+                  state.handleCliTimeoutChange(parsed);
+                }
+              }}
+              variant="compact"
+              disabled={state.isCliTimeoutUpdating}
+              className="w-24"
+            />
+          </SettingContainer>
+
+          <SettingContainer
+            title={t("settings.postProcessing.api.cli.status.title")}
+            description={t(
+              "settings.postProcessing.api.cli.status.description",
+            )}
+            descriptionMode="tooltip"
+            layout="stacked"
+            grouped={true}
+          >
+            <div className="space-y-2">
+              <Button
+                onClick={state.handleCheckCliStatus}
+                variant="secondary"
+                size="md"
+                disabled={state.isCliStatusChecking}
+              >
+                {state.isCliStatusChecking
+                  ? t("settings.postProcessing.api.cli.status.checking")
+                  : t("settings.postProcessing.api.cli.status.check")}
+              </Button>
+              {state.cliStatus ? (
+                <Alert
+                  variant={
+                    !state.cliStatus.binary_found ||
+                    state.cliStatus.logged_in === false
+                      ? "error"
+                      : state.cliStatus.logged_in === true
+                        ? "success"
+                        : "info"
+                  }
+                  contained
+                >
+                  <div className="space-y-1">
+                    <p>{state.cliStatus.message}</p>
+                    {state.cliStatus.login_hint ? (
+                      <p>{state.cliStatus.login_hint}</p>
+                    ) : null}
+                  </div>
+                </Alert>
+              ) : null}
+            </div>
+          </SettingContainer>
+        </>
       ) : (
         <>
           {state.selectedProvider?.id === "custom" && (
@@ -98,11 +220,17 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
 
       {!state.isAppleProvider && (
         <SettingContainer
-          title={t("settings.postProcessing.api.model.title")}
+          title={
+            state.isCliProvider
+              ? t("settings.postProcessing.api.cli.model.title")
+              : t("settings.postProcessing.api.model.title")
+          }
           description={
-            state.isCustomProvider
-              ? t("settings.postProcessing.api.model.descriptionCustom")
-              : t("settings.postProcessing.api.model.descriptionDefault")
+            state.isCliProvider
+              ? t("settings.postProcessing.api.cli.model.description")
+              : state.isCustomProvider
+                ? t("settings.postProcessing.api.model.descriptionCustom")
+                : t("settings.postProcessing.api.model.descriptionDefault")
           }
           descriptionMode="tooltip"
           layout="stacked"
@@ -115,27 +243,33 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
               disabled={state.isModelUpdating}
               isLoading={state.isFetchingModels}
               placeholder={
-                state.modelOptions.length > 0
-                  ? t(
-                      "settings.postProcessing.api.model.placeholderWithOptions",
-                    )
-                  : t("settings.postProcessing.api.model.placeholderNoOptions")
+                state.isCliProvider
+                  ? t("settings.postProcessing.api.cli.model.placeholder")
+                  : state.modelOptions.length > 0
+                    ? t(
+                        "settings.postProcessing.api.model.placeholderWithOptions",
+                      )
+                    : t(
+                        "settings.postProcessing.api.model.placeholderNoOptions",
+                      )
               }
               onSelect={state.handleModelSelect}
               onCreate={state.handleModelCreate}
               onBlur={() => {}}
               className="flex-1 min-w-[380px]"
             />
-            <ResetButton
-              onClick={state.handleRefreshModels}
-              disabled={state.isFetchingModels}
-              ariaLabel={t("settings.postProcessing.api.model.refreshModels")}
-              className="flex h-10 w-10 items-center justify-center"
-            >
-              <RefreshCcw
-                className={`h-4 w-4 ${state.isFetchingModels ? "animate-spin" : ""}`}
-              />
-            </ResetButton>
+            {!state.isCliProvider && (
+              <ResetButton
+                onClick={state.handleRefreshModels}
+                disabled={state.isFetchingModels}
+                ariaLabel={t("settings.postProcessing.api.model.refreshModels")}
+                className="flex h-10 w-10 items-center justify-center"
+              >
+                <RefreshCcw
+                  className={`h-4 w-4 ${state.isFetchingModels ? "animate-spin" : ""}`}
+                />
+              </ResetButton>
+            )}
           </div>
         </SettingContainer>
       )}

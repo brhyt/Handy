@@ -444,6 +444,33 @@
           "placeholderWithOptions": "Rechercher ou sélectionner un modèle",
           "placeholderNoOptions": "Tapez un nom de modèle",
           "refreshModels": "Actualiser les modèles"
+        },
+        "cli": {
+          "binaryPath": {
+            "title": "CLI Binary",
+            "description": "Optional path to the official CLI. Leave empty to use the binary on PATH (claude, codex, or grok).",
+            "placeholder": "Leave empty to use PATH"
+          },
+          "configDir": {
+            "title": "Config Directory",
+            "description": "Optional override for the CLI's existing config/home directory (CLAUDE_CONFIG_DIR, CODEX_HOME, or GROK_HOME). Handy never reads credential files from this path.",
+            "placeholder": "Leave empty for the CLI default"
+          },
+          "timeout": {
+            "title": "Timeout (seconds)",
+            "description": "How long to wait for the CLI to rewrite a transcript before falling back to the original text."
+          },
+          "model": {
+            "title": "Model (optional)",
+            "description": "Optional model override passed to the CLI. Leave empty to use the CLI default.",
+            "placeholder": "CLI default"
+          },
+          "status": {
+            "title": "CLI Status",
+            "description": "Check whether the selected CLI is installed and logged in. Subscription login stays inside that official tool.",
+            "check": "Check Status",
+            "checking": "Checking…"
+          }
         }
       },
       "prompts": {
