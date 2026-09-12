@@ -575,6 +575,23 @@ pub struct AppSettings {
     /// (volume increment/decrement) as a Handy transcription trigger.
     #[serde(default)]
     pub dji_mic_trigger_enabled: bool,
+    /// Phrases spoken at the start of a dictation to request the selected
+    /// post-process prompt (LLM rewrite). Matched case-insensitively with
+    /// light fuzzy tolerance.
+    #[serde(default = "default_prompt_mode_cues")]
+    pub prompt_mode_cues: Vec<String>,
+    /// Phrases spoken at the start of a dictation to force verbatim output
+    /// and clear a sticky prompt-mode arm.
+    #[serde(default = "default_verbatim_cues")]
+    pub verbatim_cues: Vec<String>,
+    /// When true, a prompt-mode cue arms rewrite for later dictations until
+    /// a verbatim cue (or the settings toggle) clears it.
+    #[serde(default = "default_prompt_mode_sticky_enabled")]
+    pub prompt_mode_sticky_enabled: bool,
+    /// Runtime sticky-arm state. Persisted so it survives across utterances
+    /// and app restarts; the settings UI can clear it.
+    #[serde(default)]
+    pub prompt_mode_sticky_armed: bool,
 }
 
 fn default_model() -> String {
@@ -692,6 +709,18 @@ fn default_theme() -> Theme {
 
 fn default_post_process_enabled() -> bool {
     false
+}
+
+fn default_prompt_mode_cues() -> Vec<String> {
+    vec!["prompt mode".to_string(), "prompt rewrite".to_string()]
+}
+
+fn default_verbatim_cues() -> Vec<String> {
+    vec!["verbatim".to_string(), "plain mode".to_string()]
+}
+
+fn default_prompt_mode_sticky_enabled() -> bool {
+    true
 }
 
 fn default_app_language() -> String {
@@ -1032,6 +1061,10 @@ pub fn get_default_settings() -> AppSettings {
         vad_backend: VadBackend::default(),
         overlay_style: default_overlay_style(),
         dji_mic_trigger_enabled: false,
+        prompt_mode_cues: default_prompt_mode_cues(),
+        verbatim_cues: default_verbatim_cues(),
+        prompt_mode_sticky_enabled: default_prompt_mode_sticky_enabled(),
+        prompt_mode_sticky_armed: false,
     }
 }
 
@@ -1342,6 +1375,16 @@ mod tests {
         assert_eq!(settings.hold_threshold_ms, default_hold_threshold_ms());
         assert!(!settings.audio_feedback);
         assert!(settings.filler_word_removal_enabled);
+        assert_eq!(
+            settings.prompt_mode_cues,
+            vec!["prompt mode".to_string(), "prompt rewrite".to_string()]
+        );
+        assert_eq!(
+            settings.verbatim_cues,
+            vec!["verbatim".to_string(), "plain mode".to_string()]
+        );
+        assert!(settings.prompt_mode_sticky_enabled);
+        assert!(!settings.prompt_mode_sticky_armed);
         // Bindings default to empty; the load path merges the real defaults in.
         assert!(settings.bindings.is_empty());
     }

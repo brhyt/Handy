@@ -466,6 +466,31 @@
         "cancel": "Annuler",
         "selectToEdit": "Sélectionnez un prompt ci-dessus pour voir et modifier ses détails.",
         "createFirst": "Cliquez sur 'Créer un nouveau prompt' ci-dessus pour créer votre premier prompt de post-traitement."
+      },
+      "spokenMode": {
+        "title": "Spoken Mode Switch",
+        "add": "Add",
+        "reset": "Reset to defaults",
+        "remove": "Remove {{cue}}",
+        "duplicate": "\"{{cue}}\" is already in the list",
+        "promptCues": {
+          "title": "Prompt-mode cues",
+          "description": "If a dictation starts with one of these phrases, Handy strips the cue and runs the selected post-process prompt. Default dictation and DJI Mic Link stay verbatim without a cue.",
+          "placeholder": "prompt mode"
+        },
+        "verbatimCues": {
+          "title": "Verbatim cues",
+          "description": "If a dictation starts with one of these phrases, Handy strips the cue and keeps the transcript verbatim — even on the post-process shortcut — and clears a sticky arm.",
+          "placeholder": "verbatim"
+        },
+        "sticky": {
+          "title": "Sticky prompt mode",
+          "description": "Saying a prompt-mode cue once keeps later dictations on the selected rewrite prompt until you say a verbatim cue or turn this off."
+        },
+        "armed": {
+          "title": "Prompt rewrite armed",
+          "description": "When armed, the next dictations use the selected post-process prompt even without repeating the cue. Speak a verbatim cue or toggle this off to return to verbatim."
+        }
       }
     },
     "history": {
@@ -695,7 +720,12 @@
     "modelLoadFailedUnknown": "modèle inconnu",
     "pasteFailedTitle": "Échec du collage du texte",
     "pasteFailed": "Le texte n'a pas pu être collé dans l'application active.",
-    "transcriptionFailedTitle": "Échec de la transcription"
+    "transcriptionFailedTitle": "Échec de la transcription",
+    "postProcessFallbackTitle": "Post-processing skipped",
+    "postProcessFallbackNotConfigured": "Prompt rewrite isn't configured (provider, model, or prompt). The transcript was pasted verbatim.",
+    "postProcessFallbackFailed": "Prompt rewrite failed. The transcript was pasted verbatim.",
+    "promptModeArmed": "Prompt rewrite armed. Later dictations will use the selected post-process prompt until you say a verbatim cue.",
+    "promptModeDisarmed": "Prompt rewrite off. Dictation is verbatim again."
   },
   "appLanguage": {
     "title": "Langue de l'application",

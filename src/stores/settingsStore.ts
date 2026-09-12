@@ -159,6 +159,12 @@ const settingUpdaters: {
     commands.changePostProcessEnabledSetting(value as boolean),
   post_process_selected_prompt_id: (value) =>
     commands.setPostProcessSelectedPrompt(value as string),
+  prompt_mode_cues: (value) => commands.updatePromptModeCues(value as string[]),
+  verbatim_cues: (value) => commands.updateVerbatimCues(value as string[]),
+  prompt_mode_sticky_enabled: (value) =>
+    commands.changePromptModeStickyEnabledSetting(value as boolean),
+  prompt_mode_sticky_armed: (value) =>
+    commands.changePromptModeStickyArmedSetting(value as boolean),
   mute_while_recording: (value) =>
     commands.changeMuteWhileRecordingSetting(value as boolean),
   dji_mic_trigger_enabled: (value) =>
