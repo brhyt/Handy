@@ -335,8 +335,10 @@ fn run_grok(
 ) -> Result<String, String> {
     let prompt_path = temp_file("handy-grok-prompt", prompt)?;
 
+    // Grok 1.0.5 treats `-p` as `--single <PROMPT>` (value required). The
+    // structured one-shot is `--prompt-file` plus JSON flags — do not pass
+    // a bare `-p` here.
     let mut args = vec![
-        "-p".to_string(),
         "--output-format".to_string(),
         "json".to_string(),
         "--json-schema".to_string(),
@@ -1051,12 +1053,25 @@ printf '%s\n' '{"transcription":"codex-out"}' > "$output"
     fn rewrite_via_fake_grok_prompt_file() {
         let script = write_script(
             r#"#!/bin/sh
+# Mirror Grok 1.0.5: -p/--single requires a prompt value. The structured
+# path must use --prompt-file alone (no bare -p).
 prompt=""
 while [ $# -gt 0 ]; do
-  if [ "$1" = "--prompt-file" ]; then
-    shift
-    prompt="$1"
-  fi
+  case "$1" in
+    -p|--single)
+      shift
+      if [ -z "$1" ] || [ "${1#-}" != "$1" ]; then
+        printf '%s\n' "error: a value is required for '--single <PROMPT>' but none was supplied" >&2
+        exit 2
+      fi
+      printf '%s\n' "error: structured invoke must not pass --single; use --prompt-file" >&2
+      exit 3
+      ;;
+    --prompt-file)
+      shift
+      prompt="$1"
+      ;;
+  esac
   shift
 done
 test -n "$prompt"
@@ -1071,6 +1086,45 @@ printf '%s\n' '{"text":"grok-out"}'
         let text = rewrite_transcription_blocking(CliKind::Grok, &settings, "", "hello")
             .expect("fake grok should succeed");
         assert_eq!(text, "grok-out");
+        let _ = fs::remove_file(script);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rewrite_via_fake_grok_falls_back_to_single_prompt() {
+        let script = write_script(
+            r#"#!/bin/sh
+# Older / minimal Grok: reject --prompt-file, accept -p/--single PROMPT.
+single=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prompt-file|--json-schema)
+      printf '%s\n' "error: unexpected argument '$1' found" >&2
+      exit 2
+      ;;
+    -p|--single)
+      shift
+      if [ -z "$1" ] || [ "${1#-}" != "$1" ]; then
+        printf '%s\n' "error: a value is required for '--single <PROMPT>' but none was supplied" >&2
+        exit 2
+      fi
+      single="$1"
+      ;;
+  esac
+  shift
+done
+test -n "$single"
+printf '%s\n' '{"text":"grok-fallback"}'
+"#,
+        );
+        let settings = CliHarnessSettings {
+            binary_path: script.to_string_lossy().into_owned(),
+            config_dir: String::new(),
+            timeout_secs: 15,
+        };
+        let text = rewrite_transcription_blocking(CliKind::Grok, &settings, "", "hello")
+            .expect("fake grok fallback should succeed");
+        assert_eq!(text, "grok-fallback");
         let _ = fs::remove_file(script);
     }
 
