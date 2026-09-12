@@ -343,6 +343,17 @@ async changeMuteWhileRecordingSetting(enabled: boolean) : Promise<Result<null, s
     else return { status: "error", error: e  as any };
 }
 },
+async changeDjiMicTriggerEnabledSetting(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_dji_mic_trigger_enabled_setting", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getDjiMicTriggerStatus() : Promise<DjiMicTriggerStatus> {
+    return await TAURI_INVOKE("get_dji_mic_trigger_status");
+},
 async changeAppendTrailingSpaceSetting(enabled: boolean) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_append_trailing_space_setting", { enabled }) };
@@ -1004,8 +1015,14 @@ vad_backend?: VadBackend;
  * not gated on this — that follows model capability. Migrated from the old
  * `overlay_position` (position `none` → style `None`).
  */
-overlay_style?: OverlayStyle }
+overlay_style?: OverlayStyle; 
+/**
+ * macOS: treat DJI Mic 2 TX Link (short press → RX USB consumer volume)
+ * as a Handy transcription trigger.
+ */
+dji_mic_trigger_enabled?: boolean }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
+export type DjiMicTriggerStatus = { supported: boolean; enabled: boolean; listener_running: boolean; volume_swallow_active: boolean; receiver_present: boolean; button_seen: boolean; last_device_name: string | null; last_hid_usage: string | null }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AvailableAccelerators = { transcribe: string[]; ort: string[]; gpu_devices: GpuDeviceOption[] }
 export type BindingResponse = { success: boolean; binding: ShortcutBinding | null; error: string | null }
