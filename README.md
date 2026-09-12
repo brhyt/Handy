@@ -113,13 +113,13 @@ handy --start-hidden --no-tray
 
 ## DJI Mic button (macOS)
 
-A USB-connected DJI wireless receiver can start and stop Handy dictation. macOS sees that receiver as an audio device plus **consumer-control volume keys**, not as a dedicated “Link” keyboard button.
+A USB-connected DJI Mic 2 receiver can start and stop Handy dictation. macOS sees that receiver as an audio device plus **consumer-control volume keys**.
 
-**What works:** the receiver’s USB HID volume event (vendor `0x2CA3`; product IDs `0x4008` / `0x4011` are known, others can still match). On some DJI models the RX linking/connecting button is that event. Enable **Settings → General → DJI Mic button**. Prefer **Toggle** or **Auto** shortcut behavior. Grant Handy **Input Monitoring** if you do not want that button to change system volume.
+**What works:** **Mic 2 TX Link short-press**, forwarded by the USB receiver (`0x2CA3` / `0x4008`, “Wireless Microphone RX”) as a consumer volume HID / system Sound Up event. Enable **Settings → General → DJI Mic button**. Prefer **Toggle** or **Auto**. Grant Handy **Input Monitoring** so Link does not change system volume.
 
-**What is not claimed:** the transmitter **Link** button as its own Mac HID control. A Mac with the RX on USB does not get a separate TX Link key. On some models (confirmed by others on Mic Mini 2) DJI forwards the TX linking press over the wireless link as the same RX volume HID — if Mic 2 does that, Handy will fire; this fork has not hardware-verified it. Bluetooth-only mode has no button events.
+**Do not use:** hold Link (pairing), TX Power (noise reduction — this mutes/thins TX audio), or Rec hold (Bluetooth mode switch). Bluetooth-only mode has no button events.
 
-See [docs/dji-mic-trigger.md](docs/dji-mic-trigger.md) for permissions, how to test which button is visible, and why this is implemented inside Handy instead of a LaunchAgent remapper.
+See [docs/dji-mic-trigger.md](docs/dji-mic-trigger.md) for status lines, rebuild/test steps, and why Handy uses the CGEvent tap when `IOHIDManager` values never arrive.
 
 ## Known Issues & Current Limitations
 

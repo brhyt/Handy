@@ -1017,12 +1017,12 @@ vad_backend?: VadBackend;
  */
 overlay_style?: OverlayStyle; 
 /**
- * macOS: treat the DJI wireless receiver's USB consumer-control button
- * (volume increment/decrement) as a Handy transcription trigger.
+ * macOS: treat DJI Mic 2 TX Link (short press → RX USB consumer volume)
+ * as a Handy transcription trigger.
  */
 dji_mic_trigger_enabled?: boolean }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
-export type DjiMicTriggerStatus = { supported: boolean; enabled: boolean; listener_running: boolean; volume_swallow_active: boolean; receiver_seen: boolean; last_device_name: string | null }
+export type DjiMicTriggerStatus = { supported: boolean; enabled: boolean; listener_running: boolean; volume_swallow_active: boolean; receiver_present: boolean; button_seen: boolean; last_device_name: string | null; last_hid_usage: string | null }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AvailableAccelerators = { transcribe: string[]; ort: string[]; gpu_devices: GpuDeviceOption[] }
 export type BindingResponse = { success: boolean; binding: ShortcutBinding | null; error: string | null }

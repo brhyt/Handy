@@ -45,16 +45,28 @@ export const DjiMicTrigger: React.FC<DjiMicTriggerProps> = React.memo(
 
     let statusText: string | null = null;
     if (enabled && status) {
+      const device =
+        status.last_device_name ||
+        t("settings.general.djiMicTrigger.defaultDeviceName");
+      const usage = status.last_hid_usage ? ` (${status.last_hid_usage})` : "";
       if (!status.supported) {
         statusText = t("settings.general.djiMicTrigger.statusUnsupported");
-      } else if (status.receiver_seen && status.last_device_name) {
-        statusText = t("settings.general.djiMicTrigger.statusRunning", {
-          device: status.last_device_name,
+      } else if (status.button_seen) {
+        statusText = t("settings.general.djiMicTrigger.statusButtonSeen", {
+          device,
+          usage,
         });
+      } else if (status.receiver_present) {
+        statusText = t("settings.general.djiMicTrigger.statusReceiverReady", {
+          device,
+        });
+        if (status.listener_running && !status.volume_swallow_active) {
+          statusText = `${statusText} ${t("settings.general.djiMicTrigger.statusNoSwallow")}`;
+        }
       } else if (status.listener_running && !status.volume_swallow_active) {
         statusText = t("settings.general.djiMicTrigger.statusNoSwallow");
       } else {
-        statusText = t("settings.general.djiMicTrigger.statusWaiting");
+        statusText = t("settings.general.djiMicTrigger.statusWaitingReceiver");
       }
     }
 

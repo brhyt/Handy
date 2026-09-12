@@ -7,25 +7,16 @@
 //! can see is reported as volume increment/decrement (usage page 0x0C, usages
 //! 0xE9 / 0xEA), not as a dedicated keyboard key.
 //!
-//! This module watches that scoped HID stream (DJI vendor `0x2CA3`) and feeds
-//! the existing [`TranscriptionCoordinator`]. A CGEvent tap swallows the
-//! matching system media-key only when a DJI HID event was just seen, so the
-//! laptop's own volume keys keep working.
+//! On **DJI Mic 2**, a short press of the transmitter **Link** button is
+//! forwarded by the USB receiver (`0x2CA3` / `0x4008`, "Wireless Microphone RX")
+//! as that same consumer-volume HID. macOS turns it into an `NSSystemDefined`
+//! Sound Up/Down event (this is why Link changes system volume when Handy is
+//! off). The receiver is often an `AppleUserHIDEventService`, so `IOHIDManager`
+//! input-value callbacks may never fire even though the device is listed by
+//! `hidutil` — the CGEvent tap is then the reliable edge.
 //!
-//! ## What this can and cannot observe
-//!
-//! - **Works:** the USB receiver's consumer volume event. Third-party tools
-//!   have seen this from product IDs `0x4008` and `0x4011` ("Wireless Mic Rx").
-//!   On some DJI models the receiver's own linking/connecting button is that
-//!   event. On Mic Mini 2, DJI's camera-shutter feature also forwards the
-//!   *transmitter* linking button over the wireless link as the same RX USB
-//!   volume HID. This crate implements that HID path; if a Mic 2 TX linking
-//!   press is forwarded the same way, it will fire automatically.
-//! - **Not claimed:** a Mic 2 transmitter linking button as its own Mac HID
-//!   device. When the TX is Bluetooth-linked to a phone the linking button can
-//!   act as a shutter; that path is not what a USB-connected Mac sees.
-//! - **Does not work:** Bluetooth-only / no USB receiver. macOS then sees an
-//!   audio device without button HID.
+//! Hold Link = pairing. TX Power = noise reduction. TX Rec hold = Bluetooth
+//! mode. Those are on-device and are not this trigger.
 //!
 //! Keyboard volume keys are never remapped. No leftover `hidutil` mapping is
 //! applied, so quitting Handy restores normal DJI volume-button behavior.
@@ -43,34 +34,50 @@ use crate::settings::{get_settings, write_settings};
 pub const DJI_VENDOR_ID: u32 = 0x2CA3;
 
 /// Product IDs reported by existing DJI wireless-mic receivers on macOS.
-/// `0x4008` is used by handy-dji-mic-trigger; `0x4011` by dji-mic-command /
-/// dji-mic-wispr-flow ("Wireless Mic Rx"). Unknown Mic 2 IDs still match on
-/// vendor + consumer volume (see [`is_dji_consumer_volume_event`]).
+/// `0x4008` is Mic 2 / handy-dji-mic-trigger; `0x4011` is dji-mic-command
+/// ("Wireless Mic Rx").
 pub const KNOWN_RECEIVER_PRODUCT_IDS: &[u32] = &[0x4008, 0x4011];
 
 /// HID Consumer Control usage page.
 pub const HID_CONSUMER_PAGE: u32 = 0x0C;
-/// Volume increment (consumer usage).
+/// Device-level PrimaryUsage advertised by Mic 2 RX (`hidutil`).
+pub const HID_CONSUMER_CONTROL_COLLECTION: u32 = 0x01;
+/// Volume increment (consumer usage) — Mic 2 TX Link short-press.
 pub const HID_VOLUME_INCREMENT: u32 = 0xE9;
 /// Volume decrement (consumer usage).
 pub const HID_VOLUME_DECREMENT: u32 = 0xEA;
+pub const HID_MUTE: u32 = 0xE2;
+pub const HID_PLAY_PAUSE: u32 = 0xCD;
+pub const HID_SCAN_NEXT: u32 = 0xB5;
+pub const HID_SCAN_PREV: u32 = 0xB6;
+pub const HID_STOP: u32 = 0xB7;
+pub const HID_EJECT: u32 = 0xB8;
 
 /// How long after a DJI HID event a system media-key is treated as that button.
 pub const DJI_MEDIA_WINDOW_MS: u64 = 350;
+
+/// Delay before re-opening Wireless Microphone RX after a Link edge, so a USB
+/// composite reset from HID handling can finish before capture starts.
+pub const DJI_STREAM_RECOVER_MS: u64 = 280;
 
 /// NSEvent subtype for aux/consumer control buttons (volume, play, etc.).
 const AUX_CONTROL_SUBTYPE: i16 = 8;
 const NX_KEYTYPE_SOUND_UP: i64 = 0;
 const NX_KEYTYPE_SOUND_DOWN: i64 = 1;
+const NX_KEYTYPE_MUTE: i64 = 7;
 const NX_KEY_STATE_DOWN: i64 = 0x0A;
 const NX_KEY_STATE_UP: i64 = 0x0B;
+const CG_KEYBOARD_EVENT_KEYBOARD_TYPE: u32 = 10;
 
 /// Process-wide listener flag so the settings command can report status
 /// without holding the macOS run-loop thread.
 static LISTENER_RUNNING: AtomicBool = AtomicBool::new(false);
 static VOLUME_SWALLOW_ACTIVE: AtomicBool = AtomicBool::new(false);
-static RECEIVER_SEEN: AtomicBool = AtomicBool::new(false);
+static RECEIVER_PRESENT: AtomicBool = AtomicBool::new(false);
+static BUTTON_SEEN: AtomicBool = AtomicBool::new(false);
+static HID_VALUES_SEEN: AtomicBool = AtomicBool::new(false);
 static LAST_DEVICE_NAME: Mutex<Option<String>> = Mutex::new(None);
+static LAST_HID_USAGE: Mutex<Option<String>> = Mutex::new(None);
 
 /// Frontend / command snapshot of the DJI trigger.
 #[derive(Debug, Clone, Serialize, Type)]
@@ -81,8 +88,13 @@ pub struct DjiMicTriggerStatus {
     pub listener_running: bool,
     /// `true` when the CGEvent tap is installed and can suppress DJI volume.
     pub volume_swallow_active: bool,
-    pub receiver_seen: bool,
+    /// USB receiver is enumerated (HID and/or CoreAudio), even if no button fired.
+    pub receiver_present: bool,
+    /// A HID value, input report, or attributed Link/volume media-key was seen.
+    pub button_seen: bool,
     pub last_device_name: Option<String>,
+    /// Last observed usage, e.g. `0x000c/0x00e9` or `media:sound-up`.
+    pub last_hid_usage: Option<String>,
 }
 
 /// Owned handle so the listener can be started and stopped with the setting.
@@ -108,6 +120,7 @@ impl Drop for ListenerGuard {
         }
         LISTENER_RUNNING.store(false, Ordering::SeqCst);
         VOLUME_SWALLOW_ACTIVE.store(false, Ordering::SeqCst);
+        RECEIVER_PRESENT.store(false, Ordering::SeqCst);
     }
 }
 
@@ -132,6 +145,7 @@ fn apply_enabled(app: &AppHandle, enabled: bool) {
 
     if !enabled {
         *guard = None;
+        stop_warm_stream_if_on_demand(app);
         return;
     }
 
@@ -140,6 +154,14 @@ fn apply_enabled(app: &AppHandle, enabled: bool) {
     }
 
     maybe_select_dji_microphone(app);
+    if let Some(name) = find_dji_input_device_name() {
+        remember_device_present(&name);
+    }
+
+    // Open Wireless Microphone RX *before* HID/tap so a later Link press does
+    // not coincide with the first CoreAudio open (that pair can drop TX audio
+    // on the USB composite device).
+    warm_dji_receiver_stream(app);
 
     #[cfg(target_os = "macos")]
     {
@@ -149,6 +171,8 @@ fn apply_enabled(app: &AppHandle, enabled: bool) {
     {
         warn!("DJI mic trigger is only implemented on macOS");
     }
+
+    recover_dji_receiver_stream(app.clone());
 }
 
 #[tauri::command]
@@ -175,14 +199,25 @@ pub fn change_dji_mic_trigger_enabled_setting(app: AppHandle, enabled: bool) -> 
 #[specta::specta]
 pub fn get_dji_mic_trigger_status(app: AppHandle) -> DjiMicTriggerStatus {
     let enabled = get_settings(&app).dji_mic_trigger_enabled;
+    if enabled {
+        if let Some(name) = find_dji_input_device_name() {
+            remember_device_present(&name);
+        }
+    }
     let last_device_name = LAST_DEVICE_NAME.lock().ok().and_then(|g| g.clone());
+    let last_hid_usage = LAST_HID_USAGE.lock().ok().and_then(|g| g.clone());
     DjiMicTriggerStatus {
         supported: cfg!(target_os = "macos"),
         enabled,
         listener_running: LISTENER_RUNNING.load(Ordering::SeqCst),
         volume_swallow_active: VOLUME_SWALLOW_ACTIVE.load(Ordering::SeqCst),
-        receiver_seen: RECEIVER_SEEN.load(Ordering::SeqCst),
+        receiver_present: RECEIVER_PRESENT.load(Ordering::SeqCst)
+            || last_device_name
+                .as_deref()
+                .is_some_and(looks_like_dji_mic_name),
+        button_seen: BUTTON_SEEN.load(Ordering::SeqCst),
         last_device_name,
+        last_hid_usage,
     }
 }
 
@@ -249,10 +284,12 @@ pub fn is_dji_consumer_volume_event(
     usage_page: u32,
     usage: u32,
 ) -> bool {
+    is_dji_receiver_hid(vendor_id, product_id, product_name)
+        && is_consumer_volume_usage(usage_page, usage)
+}
+
+pub fn is_dji_receiver_hid(vendor_id: u32, product_id: u32, product_name: &str) -> bool {
     if !is_dji_vendor(vendor_id) {
-        return false;
-    }
-    if !is_consumer_volume_usage(usage_page, usage) {
         return false;
     }
     if let Some(required) = env_product_filter() {
@@ -264,9 +301,8 @@ pub fn is_dji_consumer_volume_event(
     if looks_like_dji_mic_name(product_name) {
         return true;
     }
-    // Unknown DJI product that still speaks consumer volume — accept it so a
-    // Mic 2 receiver with an unpublished PID is not silently ignored. Other
-    // DJI gadgets almost never expose this HID usage.
+    // Unknown DJI product that still speaks consumer control — accept it so a
+    // Mic 2 receiver with an unpublished PID is not silently ignored.
     product_name.trim().is_empty() || !looks_like_unrelated_dji_product(product_name)
 }
 
@@ -277,6 +313,22 @@ pub fn is_dji_vendor(vendor_id: u32) -> bool {
 pub fn is_consumer_volume_usage(usage_page: u32, usage: u32) -> bool {
     usage_page == HID_CONSUMER_PAGE
         && (usage == HID_VOLUME_INCREMENT || usage == HID_VOLUME_DECREMENT)
+}
+
+/// Usages that should start/stop Handy. Volume increment (Link) is preferred.
+pub fn is_dji_trigger_usage(usage_page: u32, usage: u32) -> bool {
+    usage_page == HID_CONSUMER_PAGE
+        && matches!(
+            usage,
+            HID_VOLUME_INCREMENT
+                | HID_VOLUME_DECREMENT
+                | HID_MUTE
+                | HID_PLAY_PAUSE
+                | HID_SCAN_NEXT
+                | HID_SCAN_PREV
+                | HID_STOP
+                | HID_EJECT
+        )
 }
 
 fn looks_like_unrelated_dji_product(name: &str) -> bool {
@@ -295,6 +347,16 @@ fn env_vendor_id() -> u32 {
 
 fn env_product_filter() -> Option<u32> {
     parse_hex_env("DJI_PRODUCT_ID")
+}
+
+fn volume_fallback_enabled() -> bool {
+    match std::env::var("DJI_VOLUME_FALLBACK") {
+        Ok(v) => {
+            let v = v.trim();
+            v != "0" && !v.eq_ignore_ascii_case("false")
+        }
+        Err(_) => true,
+    }
 }
 
 fn parse_hex_env(name: &str) -> Option<u32> {
@@ -331,6 +393,7 @@ pub fn decode_aux_control(subtype: i16, data1: i64) -> Option<(AuxMediaKey, bool
     let key = match key_code {
         NX_KEYTYPE_SOUND_UP => AuxMediaKey::SoundUp,
         NX_KEYTYPE_SOUND_DOWN => AuxMediaKey::SoundDown,
+        NX_KEYTYPE_MUTE => AuxMediaKey::Mute,
         _ => return None,
     };
     Some((key, pressed))
@@ -340,16 +403,78 @@ pub fn decode_aux_control(subtype: i16, data1: i64) -> Option<(AuxMediaKey, bool
 pub enum AuxMediaKey {
     SoundUp,
     SoundDown,
+    Mute,
+}
+
+/// Decide whether a system volume/mute media-key is the DJI Link path.
+///
+/// Mic 2 RX is often `AppleUserHIDEventService`: Link changes system volume
+/// (CGEvent) but `IOHIDManager` value callbacks never run. In that case we
+/// still treat a sourceless volume key as Link while the USB receiver is
+/// present, so laptop keys with a real keyboard type stay untouched.
+pub fn should_treat_as_dji_media_event(
+    receiver_present: bool,
+    hid_recent: bool,
+    event_vendor_id: u32,
+    event_product_id: u32,
+    keyboard_type: i64,
+    hid_values_seen: bool,
+    volume_fallback: bool,
+) -> bool {
+    if hid_recent {
+        return true;
+    }
+    if is_dji_vendor(event_vendor_id) {
+        return true;
+    }
+    if event_product_id != 0 && KNOWN_RECEIVER_PRODUCT_IDS.contains(&event_product_id) {
+        return true;
+    }
+    volume_fallback
+        && receiver_present
+        && !hid_values_seen
+        && event_vendor_id == 0
+        && keyboard_type == 0
+}
+
+fn format_hid_usage(usage_page: u32, usage: u32) -> String {
+    format!("0x{usage_page:04x}/0x{usage:04x}")
 }
 
 fn remember_device_name(name: &str) {
-    RECEIVER_SEEN.store(true, Ordering::SeqCst);
+    if name.trim().is_empty() {
+        return;
+    }
     if let Ok(mut slot) = LAST_DEVICE_NAME.lock() {
         if slot.as_deref() != Some(name) {
-            info!("DJI mic trigger: receiver HID '{}'", name);
+            info!("DJI mic trigger: receiver HID '{name}'");
             *slot = Some(name.to_string());
         }
     }
+}
+
+fn remember_device_present(name: &str) {
+    remember_device_name(name);
+    RECEIVER_PRESENT.store(true, Ordering::SeqCst);
+}
+
+fn remember_button(usage: &str) {
+    BUTTON_SEEN.store(true, Ordering::SeqCst);
+    RECEIVER_PRESENT.store(true, Ordering::SeqCst);
+    if let Ok(mut slot) = LAST_HID_USAGE.lock() {
+        if slot.as_deref() != Some(usage) {
+            *slot = Some(usage.to_string());
+        }
+    }
+}
+
+fn receiver_is_present() -> bool {
+    RECEIVER_PRESENT.load(Ordering::SeqCst)
+        || LAST_DEVICE_NAME
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .is_some_and(|n| looks_like_dji_mic_name(&n))
 }
 
 fn fire_media_edge(app: &AppHandle, is_pressed: bool) {
@@ -369,6 +494,50 @@ fn fire_media_edge(app: &AppHandle, is_pressed: bool) {
 
 fn fire_hid_only_toggle(app: &AppHandle) {
     crate::signal_handle::send_transcription_input(app, "transcribe", "dji-mic");
+}
+
+fn warm_dji_receiver_stream(app: &AppHandle) {
+    let Some(rm) = app.try_state::<std::sync::Arc<crate::managers::audio::AudioRecordingManager>>()
+    else {
+        return;
+    };
+    match rm.start_microphone_stream() {
+        Ok(()) => info!(
+            "DJI mic trigger: warmed Wireless Microphone RX stream so Link \
+             does not re-init USB audio on the first press"
+        ),
+        Err(e) => warn!("DJI mic trigger: could not warm microphone stream: {e}"),
+    }
+}
+
+fn recover_dji_receiver_stream(app: AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(DJI_STREAM_RECOVER_MS));
+        let Some(rm) =
+            app.try_state::<std::sync::Arc<crate::managers::audio::AudioRecordingManager>>()
+        else {
+            return;
+        };
+        if let Err(e) = rm.start_microphone_stream() {
+            warn!("DJI mic trigger: microphone stream recover failed: {e}");
+        } else {
+            debug!("DJI mic trigger: microphone stream recover/keep-alive ok");
+        }
+    });
+}
+
+fn stop_warm_stream_if_on_demand(app: &AppHandle) {
+    if get_settings(app).always_on_microphone {
+        return;
+    }
+    let Some(rm) = app.try_state::<std::sync::Arc<crate::managers::audio::AudioRecordingManager>>()
+    else {
+        return;
+    };
+    if rm.is_recording() {
+        return;
+    }
+    rm.stop_microphone_stream();
 }
 
 #[cfg(target_os = "macos")]
@@ -400,6 +569,7 @@ mod macos {
         last_dji_hid_ms: std::sync::atomic::AtomicU64,
         tap_active: AtomicBool,
         tap_port: std::sync::atomic::AtomicPtr<c_void>,
+        report_bufs: Mutex<Vec<Box<[u8]>>>,
     }
 
     pub fn stop_runloop() {
@@ -411,6 +581,11 @@ mod macos {
     }
 
     pub fn start_listener(app: AppHandle) -> ListenerGuard {
+        BUTTON_SEEN.store(false, Ordering::SeqCst);
+        HID_VALUES_SEEN.store(false, Ordering::SeqCst);
+        if let Ok(mut slot) = LAST_HID_USAGE.lock() {
+            *slot = None;
+        }
         let stop = Arc::new(AtomicBool::new(false));
         let stop_for_thread = Arc::clone(&stop);
         let join = std::thread::Builder::new()
@@ -436,6 +611,7 @@ mod macos {
             last_dji_hid_ms: std::sync::atomic::AtomicU64::new(0),
             tap_active: AtomicBool::new(false),
             tap_port: std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()),
+            report_bufs: Mutex::new(Vec::new()),
         }));
         // SAFETY: this thread owns `shared_ptr` until CFRunLoopRun returns.
         let shared = unsafe { &*shared_ptr };
@@ -454,7 +630,8 @@ mod macos {
             shared.tap_active.store(true, Ordering::SeqCst);
             VOLUME_SWALLOW_ACTIVE.store(true, Ordering::SeqCst);
             info!(
-                "DJI mic trigger: listening for vendor 0x{:04x} consumer volume (event tap on)",
+                "DJI mic trigger: listening for vendor 0x{:04x} (SInt32 match, \
+                 event tap on, Link short-press = volume HID)",
                 env_vendor_id()
             );
         } else {
@@ -491,6 +668,24 @@ mod macos {
         info!("DJI mic trigger: listener stopped");
     }
 
+    fn hid_s32(value: u32) -> CFNumber {
+        // IOKit VendorID/ProductID matching expects kCFNumberSInt32Type.
+        // CFNumber::from(i64) is SInt64 and often matches *nothing*.
+        CFNumber::from(value as i32)
+    }
+
+    fn matching_dict(pairs: &[(&'static str, u32)]) -> CFDictionary {
+        let owned: Vec<(CFString, CFNumber)> = pairs
+            .iter()
+            .map(|(key, value)| (CFString::from_static_string(key), hid_s32(*value)))
+            .collect();
+        let refs: Vec<(CFType, CFType)> = owned
+            .iter()
+            .map(|(k, v)| (k.as_CFType(), v.as_CFType()))
+            .collect();
+        CFDictionary::from_CFType_pairs(&refs)
+    }
+
     fn open_hid_manager(shared: &Shared) -> Option<HidManager> {
         unsafe {
             let manager = IOHIDManagerCreate(std::ptr::null(), K_IO_HID_OPTIONS_NONE);
@@ -498,12 +693,24 @@ mod macos {
                 return None;
             }
 
-            let vendor = CFNumber::from(env_vendor_id() as i64);
-            let vendor_key = CFString::from_static_string("VendorID");
-            let matching =
-                CFDictionary::from_CFType_pairs(&[(vendor_key.as_CFType(), vendor.as_CFType())]);
-            IOHIDManagerSetDeviceMatching(manager, matching.as_concrete_TypeRef() as *const c_void);
+            // Vendor-only, SInt32. Product-only matching is too easy to miss a
+            // firmware PID; 0x4008 still matches because it is vendor 0x2CA3.
+            let vendor = matching_dict(&[("VendorID", env_vendor_id())]);
+            IOHIDManagerSetDeviceMatching(manager, vendor.as_concrete_TypeRef() as *const c_void);
 
+            // Receive every element, not just volume increment.
+            IOHIDManagerSetInputValueMatching(manager, std::ptr::null());
+
+            IOHIDManagerRegisterDeviceMatchingCallback(
+                manager,
+                hid_device_matching_callback,
+                shared as *const Shared as *mut c_void,
+            );
+            IOHIDManagerRegisterDeviceRemovalCallback(
+                manager,
+                hid_device_removal_callback,
+                shared as *const Shared as *mut c_void,
+            );
             IOHIDManagerRegisterInputValueCallback(
                 manager,
                 hid_value_callback,
@@ -525,7 +732,58 @@ mod macos {
                 return None;
             }
 
+            if !log_matched_devices(manager) {
+                info!(
+                    "DJI mic trigger: no vendor match after SInt32 open — \
+                     broadening IOHIDManager to all HID devices"
+                );
+                IOHIDManagerSetDeviceMatching(manager, std::ptr::null());
+                IOHIDManagerSetInputValueMatching(manager, std::ptr::null());
+                let _ = log_matched_devices(manager);
+            }
+
             Some(HidManager { manager })
+        }
+    }
+
+    fn log_matched_devices(manager: *mut c_void) -> bool {
+        unsafe {
+            let raw = IOHIDManagerCopyDevices(manager);
+            if raw.is_null() {
+                info!("DJI mic trigger: IOHIDManager CopyDevices is empty");
+                return false;
+            }
+            let count = CFSetGetCount(raw);
+            info!("DJI mic trigger: IOHIDManager matched {count} HID device(s)");
+            if count <= 0 {
+                CFRelease(raw);
+                return false;
+            }
+            let mut values = vec![std::ptr::null(); count as usize];
+            CFSetGetValues(raw, values.as_mut_ptr());
+            let mut saw_dji = false;
+            for device in values {
+                if device.is_null() {
+                    continue;
+                }
+                let device = device as *mut c_void;
+                let vendor_id = hid_number_prop(device, "VendorID").unwrap_or(0);
+                let product_id = hid_number_prop(device, "ProductID").unwrap_or(0);
+                let usage_page = hid_number_prop(device, "PrimaryUsagePage").unwrap_or(0);
+                let usage = hid_number_prop(device, "PrimaryUsage").unwrap_or(0);
+                let name = hid_string_prop(device, "Product").unwrap_or_default();
+                info!(
+                    "DJI mic trigger: matched HID vendor=0x{vendor_id:04x} \
+                     product=0x{product_id:04x} primary={usage_page:#06x}/{usage:#06x} \
+                     name='{name}'"
+                );
+                if is_dji_vendor(vendor_id) {
+                    saw_dji = true;
+                    remember_device_present(&name);
+                }
+            }
+            CFRelease(raw);
+            saw_dji
         }
     }
 
@@ -564,41 +822,146 @@ mod macos {
         }
     }
 
-    extern "C" fn hid_value_callback(
+    fn describe_device(device: *mut c_void) -> (u32, u32, String, u32, u32) {
+        let vendor_id = hid_number_prop(device, "VendorID").unwrap_or(0);
+        let product_id = hid_number_prop(device, "ProductID").unwrap_or(0);
+        let usage_page = hid_number_prop(device, "PrimaryUsagePage").unwrap_or(0);
+        let usage = hid_number_prop(device, "PrimaryUsage").unwrap_or(0);
+        let name = hid_string_prop(device, "Product").unwrap_or_default();
+        (vendor_id, product_id, name, usage_page, usage)
+    }
+
+    fn register_input_report(shared: &Shared, device: *mut c_void) {
+        let max_len = hid_number_prop(device, "MaxInputReportSize")
+            .unwrap_or(64)
+            .clamp(8, 256) as usize;
+        let mut buf = vec![0u8; max_len].into_boxed_slice();
+        unsafe {
+            IOHIDDeviceRegisterInputReportCallback(
+                device,
+                buf.as_mut_ptr(),
+                buf.len() as isize,
+                hid_report_callback,
+                shared as *const Shared as *mut c_void,
+            );
+        }
+        if let Ok(mut slots) = shared.report_bufs.lock() {
+            slots.push(buf);
+        }
+    }
+
+    extern "C" fn hid_device_matching_callback(
+        context: *mut c_void,
+        _result: i32,
+        _sender: *mut c_void,
+        device: *mut c_void,
+    ) {
+        if device.is_null() {
+            return;
+        }
+        let (vendor_id, product_id, name, usage_page, usage) = describe_device(device);
+        if !is_dji_vendor(vendor_id) {
+            return;
+        }
+        remember_device_present(&name);
+        info!(
+            "DJI mic trigger: device arrived vendor=0x{vendor_id:04x} \
+             product=0x{product_id:04x} primary={usage_page:#06x}/{usage:#06x} \
+             name='{name}'"
+        );
+        let shared = unsafe { &*(context as *const Shared) };
+        register_input_report(shared, device);
+    }
+
+    extern "C" fn hid_device_removal_callback(
         _context: *mut c_void,
+        _result: i32,
+        _sender: *mut c_void,
+        device: *mut c_void,
+    ) {
+        if device.is_null() {
+            return;
+        }
+        let (vendor_id, product_id, name, _, _) = describe_device(device);
+        if is_dji_vendor(vendor_id) {
+            info!(
+                "DJI mic trigger: device removed vendor=0x{vendor_id:04x} \
+                 product=0x{product_id:04x} name='{name}'"
+            );
+        }
+    }
+
+    extern "C" fn hid_value_callback(
+        context: *mut c_void,
         _result: i32,
         _sender: *mut c_void,
         value: *mut c_void,
     ) {
-        let context = unsafe { &*(_context as *const Shared) };
+        let shared = unsafe { &*(context as *const Shared) };
         let Some(event) = read_hid_event(value) else {
             return;
         };
-        if !is_dji_consumer_volume_event(
-            event.vendor_id,
-            event.product_id,
-            &event.product_name,
-            event.usage_page,
-            event.usage,
-        ) {
+        if !is_dji_vendor(event.vendor_id) {
             return;
         }
 
-        remember_device_name(&event.product_name);
-        context.last_dji_hid_ms.store(now_ms(), Ordering::SeqCst);
-        debug!(
+        remember_device_present(&event.product_name);
+        let usage = format_hid_usage(event.usage_page, event.usage);
+        // Log every DJI usage — previous builds only logged 0xE9/0xEA, so a
+        // different Link usage looked like "callback never fired".
+        info!(
             "DJI mic trigger: HID vendor=0x{:04x} product=0x{:04x} \
-             usage=0x{:02x} value={} name='{}'",
-            event.vendor_id, event.product_id, event.usage, event.int_value, event.product_name
+             usage={usage} value={} name='{}'",
+            event.vendor_id, event.product_id, event.int_value, event.product_name
         );
 
-        // Event tap owns press/release when it is running so we can match
-        // Handy’s shortcut activation mode. Without a tap, each non-zero HID
-        // pulse is a toggle — DJI buttons are click-style and often omit a
-        // clean usage=0 release.
-        if !context.tap_active.load(Ordering::SeqCst) && event.int_value != 0 {
-            fire_hid_only_toggle(&context.app);
+        if !is_dji_trigger_usage(event.usage_page, event.usage) {
+            return;
         }
+
+        HID_VALUES_SEEN.store(true, Ordering::SeqCst);
+        shared.last_dji_hid_ms.store(now_ms(), Ordering::SeqCst);
+        if event.int_value != 0 {
+            remember_button(&usage);
+            if !shared.tap_active.load(Ordering::SeqCst) {
+                fire_hid_only_toggle(&shared.app);
+                recover_dji_receiver_stream(shared.app.clone());
+            }
+        }
+    }
+
+    extern "C" fn hid_report_callback(
+        _context: *mut c_void,
+        _result: i32,
+        sender: *mut c_void,
+        _type: u32,
+        report_id: u32,
+        report: *mut u8,
+        report_length: isize,
+    ) {
+        if sender.is_null() || report.is_null() || report_length <= 0 {
+            return;
+        }
+        let vendor_id = hid_number_prop(sender, "VendorID").unwrap_or(0);
+        if !is_dji_vendor(vendor_id) {
+            return;
+        }
+        let product_id = hid_number_prop(sender, "ProductID").unwrap_or(0);
+        let name = hid_string_prop(sender, "Product").unwrap_or_default();
+        remember_device_present(&name);
+        let len = report_length as usize;
+        let bytes = unsafe { std::slice::from_raw_parts(report, len) };
+        let hex: String = bytes
+            .iter()
+            .take(16)
+            .map(|b| format!("{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        info!(
+            "DJI mic trigger: HID report vendor=0x{vendor_id:04x} \
+             product=0x{product_id:04x} id={report_id} len={len} bytes=[{hex}] \
+             name='{name}'"
+        );
     }
 
     extern "C" fn event_tap_callback(
@@ -607,12 +970,12 @@ mod macos {
         event: *mut c_void,
         user_info: *mut c_void,
     ) -> *mut c_void {
-        let context = unsafe { &*(user_info as *const Shared) };
+        let shared = unsafe { &*(user_info as *const Shared) };
 
         if event_type == K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT
             || event_type == K_CG_EVENT_TAP_DISABLED_BY_USER_INPUT
         {
-            let port = context.tap_port.load(Ordering::SeqCst);
+            let port = shared.tap_port.load(Ordering::SeqCst);
             if !port.is_null() {
                 unsafe { CGEventTapEnable(port, true) };
             }
@@ -623,21 +986,52 @@ mod macos {
             return event;
         }
 
-        let Some((subtype, data1)) = ns_event_aux_fields(event) else {
+        let Some(aux) = ns_event_aux_fields(event) else {
             return event;
         };
-        let Some((_key, pressed)) = decode_aux_control(subtype, data1) else {
+        let Some((key, pressed)) = decode_aux_control(aux.subtype, aux.data1) else {
             return event;
         };
 
-        let age = now_ms().saturating_sub(context.last_dji_hid_ms.load(Ordering::SeqCst));
-        if age > DJI_MEDIA_WINDOW_MS {
+        let keyboard_type =
+            unsafe { CGEventGetIntegerValueField(event, CG_KEYBOARD_EVENT_KEYBOARD_TYPE) };
+        let age = now_ms().saturating_sub(shared.last_dji_hid_ms.load(Ordering::SeqCst));
+        let hid_recent =
+            shared.last_dji_hid_ms.load(Ordering::SeqCst) != 0 && age <= DJI_MEDIA_WINDOW_MS;
+        let attributed = should_treat_as_dji_media_event(
+            receiver_is_present(),
+            hid_recent,
+            aux.vendor_id,
+            aux.product_id,
+            keyboard_type,
+            HID_VALUES_SEEN.load(Ordering::SeqCst),
+            volume_fallback_enabled(),
+        );
+
+        info!(
+            "DJI mic trigger: media {:?} pressed={pressed} vendor=0x{:04x} \
+             product=0x{:04x} kbdType={keyboard_type} data1={} age_ms={age} \
+             hid_recent={hid_recent} attributed={attributed}",
+            key, aux.vendor_id, aux.product_id, aux.data1
+        );
+
+        if !attributed {
             return event;
         }
 
-        fire_media_edge(&context.app, pressed);
+        let usage = match key {
+            AuxMediaKey::SoundUp => "media:sound-up",
+            AuxMediaKey::SoundDown => "media:sound-down",
+            AuxMediaKey::Mute => "media:mute",
+        };
+        remember_button(usage);
+        fire_media_edge(&shared.app, pressed);
+        if pressed {
+            recover_dji_receiver_stream(shared.app.clone());
+        }
         debug!("DJI mic trigger: swallowed media key pressed={pressed} age_ms={age}");
-        // Swallow so the DJI button does not change system volume.
+        // Swallow so Link does not change system volume. This does not undo
+        // on-device TX mute/NR — those are firmware, not a CGEvent.
         std::ptr::null_mut()
     }
 
@@ -708,7 +1102,14 @@ mod macos {
         }
     }
 
-    fn ns_event_aux_fields(event: *mut c_void) -> Option<(i16, i64)> {
+    struct AuxEventFields {
+        subtype: i16,
+        data1: i64,
+        vendor_id: u32,
+        product_id: u32,
+    }
+
+    fn ns_event_aux_fields(event: *mut c_void) -> Option<AuxEventFields> {
         use objc2::runtime::AnyObject;
         use objc2::{msg_send, ClassType};
 
@@ -720,7 +1121,14 @@ mod macos {
             }
             let subtype: isize = msg_send![ns_event, subtype];
             let data1: isize = msg_send![ns_event, data1];
-            Some((subtype as i16, data1 as i64))
+            let vendor_id: isize = msg_send![ns_event, vendorID];
+            let product_id: isize = msg_send![ns_event, productID];
+            Some(AuxEventFields {
+                subtype: subtype as i16,
+                data1: data1 as i64,
+                vendor_id: vendor_id as u32,
+                product_id: product_id as u32,
+            })
         })
     }
 
@@ -765,6 +1173,9 @@ mod macos {
     }
 
     type IOHIDValueCallback = extern "C" fn(*mut c_void, i32, *mut c_void, *mut c_void);
+    type IOHIDDeviceCallback = extern "C" fn(*mut c_void, i32, *mut c_void, *mut c_void);
+    type IOHIDReportCallback =
+        extern "C" fn(*mut c_void, i32, *mut c_void, u32, u32, *mut u8, isize);
     type CGEventTapCallBack =
         extern "C" fn(*mut c_void, u32, *mut c_void, *mut c_void) -> *mut c_void;
 
@@ -772,11 +1183,23 @@ mod macos {
     extern "C" {
         fn IOHIDManagerCreate(allocator: *const c_void, options: u32) -> *mut c_void;
         fn IOHIDManagerSetDeviceMatching(manager: *mut c_void, matching: *const c_void);
+        fn IOHIDManagerSetInputValueMatching(manager: *mut c_void, matching: *const c_void);
         fn IOHIDManagerRegisterInputValueCallback(
             manager: *mut c_void,
             callback: IOHIDValueCallback,
             context: *mut c_void,
         );
+        fn IOHIDManagerRegisterDeviceMatchingCallback(
+            manager: *mut c_void,
+            callback: IOHIDDeviceCallback,
+            context: *mut c_void,
+        );
+        fn IOHIDManagerRegisterDeviceRemovalCallback(
+            manager: *mut c_void,
+            callback: IOHIDDeviceCallback,
+            context: *mut c_void,
+        );
+        fn IOHIDManagerCopyDevices(manager: *mut c_void) -> *mut c_void;
         fn IOHIDManagerScheduleWithRunLoop(
             manager: *mut c_void,
             run_loop: core_foundation::runloop::CFRunLoopRef,
@@ -795,6 +1218,13 @@ mod macos {
         fn IOHIDElementGetUsage(element: *mut c_void) -> u32;
         fn IOHIDElementGetDevice(element: *mut c_void) -> *mut c_void;
         fn IOHIDDeviceGetProperty(device: *mut c_void, key: *const c_void) -> *const c_void;
+        fn IOHIDDeviceRegisterInputReportCallback(
+            device: *mut c_void,
+            report: *mut u8,
+            report_length: isize,
+            callback: IOHIDReportCallback,
+            context: *mut c_void,
+        );
     }
 
     #[link(name = "CoreGraphics", kind = "framework")]
@@ -808,11 +1238,14 @@ mod macos {
             user_info: *mut c_void,
         ) -> *mut c_void;
         fn CGEventTapEnable(tap: *mut c_void, enable: bool);
+        fn CGEventGetIntegerValueField(event: *mut c_void, field: u32) -> i64;
     }
 
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
         fn CFRelease(cf: *const c_void);
+        fn CFSetGetCount(set: *mut c_void) -> isize;
+        fn CFSetGetValues(set: *mut c_void, values: *mut *const c_void);
         fn CFMachPortCreateRunLoopSource(
             allocator: *const c_void,
             port: *mut c_void,
@@ -837,6 +1270,20 @@ mod tests {
         ));
         assert!(!is_consumer_volume_usage(HID_CONSUMER_PAGE, 0xCD));
         assert!(!is_consumer_volume_usage(0x01, HID_VOLUME_INCREMENT));
+    }
+
+    #[test]
+    fn trigger_usages_include_volume_and_common_media() {
+        assert!(is_dji_trigger_usage(
+            HID_CONSUMER_PAGE,
+            HID_VOLUME_INCREMENT
+        ));
+        assert!(is_dji_trigger_usage(HID_CONSUMER_PAGE, HID_MUTE));
+        assert!(is_dji_trigger_usage(HID_CONSUMER_PAGE, HID_PLAY_PAUSE));
+        assert!(!is_dji_trigger_usage(
+            HID_CONSUMER_PAGE,
+            HID_CONSUMER_CONTROL_COLLECTION
+        ));
     }
 
     #[test]
@@ -906,7 +1353,57 @@ mod tests {
             decode_aux_control(8, 0x00010A00),
             Some((AuxMediaKey::SoundDown, true))
         );
+        assert_eq!(
+            decode_aux_control(8, 0x00070A00),
+            Some((AuxMediaKey::Mute, true))
+        );
         assert_eq!(decode_aux_control(0, 2560), None);
         assert_eq!(decode_aux_control(8, 0), None);
+    }
+
+    #[test]
+    fn event_tap_uses_hid_window_even_without_vendor_on_nsevent() {
+        assert!(should_treat_as_dji_media_event(
+            true, true, 0, 0, 58, true, true
+        ));
+    }
+
+    #[test]
+    fn nsevent_vendor_is_enough_without_hid_values() {
+        assert!(should_treat_as_dji_media_event(
+            true,
+            false,
+            DJI_VENDOR_ID,
+            0x4008,
+            0,
+            false,
+            true
+        ));
+    }
+
+    #[test]
+    fn event_service_fallback_only_when_receiver_present_and_no_hid_values() {
+        assert!(should_treat_as_dji_media_event(
+            true, false, 0, 0, 0, false, true
+        ));
+        assert!(!should_treat_as_dji_media_event(
+            false, false, 0, 0, 0, false, true
+        ));
+        assert!(!should_treat_as_dji_media_event(
+            true, false, 0, 0, 58, false, true
+        ));
+        assert!(!should_treat_as_dji_media_event(
+            true, false, 0, 0, 0, true, true
+        ));
+        assert!(!should_treat_as_dji_media_event(
+            true, false, 0, 0, 0, false, false
+        ));
+    }
+
+    #[test]
+    fn laptop_volume_with_keyboard_type_is_not_dji_without_hid() {
+        assert!(!should_treat_as_dji_media_event(
+            true, false, 0x05ac, 0x0267, 58, false, true
+        ));
     }
 }

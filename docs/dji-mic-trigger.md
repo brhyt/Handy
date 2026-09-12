@@ -1,29 +1,30 @@
 # DJI Mic button → Handy dictation (macOS)
 
-Handy can start and stop dictation from a **DJI wireless-mic receiver button** when the receiver is plugged into a Mac over USB.
+Handy can start and stop dictation from **DJI Mic 2 transmitter Link** when the USB receiver is plugged into a Mac.
 
-This is not a generic “any hardware button” feature. It is scoped to the HID event macOS actually exposes for these receivers.
+This is not a generic “any hardware button” feature. It is scoped to the HID / system-volume event macOS actually exposes for these receivers.
 
-## Short answer
+## Short answer (Mic 2)
 
-| Gesture                                                                                                                             | Works on a USB-connected Mac?                                                                                                  |
-| ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Receiver USB consumer-control button (reported as volume up/down)                                                                   | **Yes** — this is what Handy listens for                                                                                       |
-| Receiver linking / connecting button, if that press is the volume HID event                                                         | **Yes**, same path                                                                                                             |
-| Transmitter **Link** button as its own Mac HID device                                                                               | **No** — macOS does not present a dedicated TX Link key                                                                        |
-| Transmitter Link button forwarded by the RX as the same volume HID (camera-shutter feature on some models, confirmed on Mic Mini 2) | **Maybe** — Handy will fire if that press appears as the RX volume event. This has **not** been hardware-verified on DJI Mic 2 |
-| Bluetooth-only (no USB receiver)                                                                                                    | **No** — audio only, no button HID                                                                                             |
+| Gesture                          | What happens on a USB-connected Mac                                                                                         |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **TX Link short press**          | Receiver forwards **consumer volume HID** (usually Sound Up). Handy starts/stops dictation. **This is the control to use.** |
+| **TX Link hold (~2s)**           | **Pairing / search.** Do not use this for Handy.                                                                            |
+| **TX Power short press**         | **Noise reduction** on the transmitter. Can make dictation sound muted or dead. Not a Mac HID trigger.                      |
+| **TX Rec hold (~3s)**            | Switch RX vs Bluetooth mode. Not a Mac HID trigger.                                                                         |
+| RX touchscreen / RX power        | Device UI / lock. Not claimed as a Handy button.                                                                            |
+| Bluetooth-only (no USB receiver) | Audio only, no button HID.                                                                                                  |
 
-Do not assume the Mic 2 transmitter Link button works until you verify it with the steps below.
+Do not hold Link. Do not use Power or Rec to trigger Handy.
 
 ## Prerequisites
 
 1. macOS (this path is not implemented on Windows or Linux).
-2. Handy built from this fork (`com.pais.handy`).
-3. DJI receiver connected with **USB-C to the Mac**. The transmitter can stay wirelessly paired to the receiver.
+2. Handy from this checkout. Upstream bundle id is `com.pais.handy`. A local Brhyt rebrand (`com.brhyt.handy` under `/Users/gi1bertorey/Sites/brhyt-Handy`) uses the same code path.
+3. DJI **receiver** connected with **USB-C to the Mac**. The transmitter stays wirelessly paired to the receiver.
 4. A transcription model already downloaded in Handy.
 5. **Accessibility** permission for Handy (already required to paste text).
-6. **Input Monitoring** for Handy if you want the DJI button **not** to change system volume.
+6. **Input Monitoring** for Handy if you want Link **not** to change system volume.
 
    System Settings → Privacy & Security → Accessibility  
    System Settings → Privacy & Security → Input Monitoring
@@ -32,63 +33,70 @@ Do not assume the Mic 2 transmitter Link button works until you verify it with t
 
 1. Open Handy → **General**.
 2. Turn on **DJI Mic button**.
-3. If Handy has not already chosen a microphone, it selects a connected input named like `Wireless Microphone RX` / `Wireless Mic Rx`.
-4. Set **Shortcut Behavior** to **Toggle** or **Auto**. Push-to-talk is a poor fit for a click-style DJI button unless the press is held and HID reports a real hold.
-5. Press the receiver button that macOS sees as volume (often the RX linking/connecting control). Handy should start listening; press again to stop and dictate.
+3. Confirm the status line becomes **USB receiver present** (not “Waiting for the USB receiver”). If it stays on waiting, the RX is not visible to CoreAudio yet — unplug/replug USB.
+4. Set microphone to **Wireless Microphone RX**, channel as needed, **Shortcut Behavior** to **Toggle** or **Auto**.
+5. **Short-press TX Link** once. Status should become **Link/volume HID seen**. Press again to stop and dictate.
 
-The status line under the toggle updates after the first HID event: `Receiver button seen: …`.
+Handy keeps the RX capture stream warm while this setting is on so Link does not coincide with the first CoreAudio open (that pair can drop TX audio on the USB composite device).
 
 ## How it works
 
-Handy already has three first-party triggers:
+A USB-connected DJI receiver is an audio device plus a **consumer-control** HID interface (vendor `0x2CA3`). Known product IDs: `0x4008` (Mic 2 “Wireless Microphone RX”), `0x4011`.
 
-- Global keyboard shortcuts (Tauri or handy-keys), with Toggle / Hold / Auto
-- CLI: `handy --toggle-transcription` via the single-instance plugin
-- Unix signals: `SIGUSR2` (and `SIGUSR1` on macOS for post-process)
+On Mic 2, **TX Link short-press is forwarded over the wireless link and emitted by the RX as volume increment** (`0x0C` / `0xE9`). macOS turns that into an `NSSystemDefined` Sound Up/Down event — the same event that bumps system volume when Handy is off.
 
-It does **not** bind media keys or arbitrary HID devices.
+The RX often appears in `hidutil` as `AppleUserHIDEventService` with device-level usage page 12 / usage 1 (Consumer Control **collection**, not volume). In that mode `IOHIDManager` **input-value callbacks may never fire**, even though the device is listed. Handy therefore:
 
-A USB-connected DJI receiver is an audio device plus a **consumer-control** HID interface (vendor `0x2CA3`). The button macOS can see is volume increment (`0x0C` / `0xE9`) or decrement (`0x0C` / `0xEA`), not a keyboard key. Known product IDs from third-party tools: `0x4008`, `0x4011` (“Wireless Mic Rx”). Unknown Mic 2 IDs still match on vendor + that consumer usage.
+1. Matches HID with **SInt32** vendor dictionaries (SInt64 matching often matches nothing), logs every DJI usage/report, and enumerates `CopyDevices`.
+2. Treats the **CGEvent tap** as the reliable Link edge: Sound Up/Down attributed to DJI (NSEvent vendor/product, or a sourceless volume key while the USB receiver is present and no HID values have arrived).
+3. Swallows that media-key so Link does not change system volume. Laptop volume keys with a real keyboard type are left alone.
+4. Feeds Handy’s existing transcription coordinator (Toggle / Hold / Auto).
+5. Warms and keeps Wireless Microphone RX open, and re-checks the stream after each Link edge, so opening capture is less likely to reset the USB audio path.
 
-When **DJI Mic button** is on, Handy:
+Swallowing a CGEvent does **not** undo on-device TX noise reduction. If audio dies after a **Power** press, turn NR off on the TX. If audio dies after **Link** while Handy is recording, Handy re-opens the RX stream; also try **Always-On Microphone**.
 
-1. Opens an `IOHIDManager` matching DJI vendor `0x2CA3`.
-2. Marks a short window when that device sends consumer volume.
-3. If Input Monitoring allows a `CGEvent` tap, swallows the matching system media-key **only in that window** so the MacBook volume keys stay normal, then feeds Handy’s existing transcription coordinator (same Toggle / Hold / Auto modes).
-4. If the tap cannot be created, Handy still toggles from the HID pulse. The DJI button may also change system volume until Input Monitoring is granted.
+No `hidutil` mapping is installed.
 
-No `hidutil` mapping is installed, so quitting Handy restores the receiver’s normal volume-button behavior. Laptop volume keys are never remapped.
+## Settings status
 
-## What will not work
+| Status                                     | Meaning                                                |
+| ------------------------------------------ | ------------------------------------------------------ |
+| Waiting for the USB receiver               | CoreAudio does not see Wireless Microphone RX          |
+| USB receiver present … short-press TX Link | RX is plugged in; Handy has not seen Link/volume yet   |
+| Link/volume HID seen                       | A press was attributed (HID usage or `media:sound-up`) |
 
-- **TX Link as a dedicated Mac button.** The transmitter linking control is a pairing / camera-shutter control on the TX. A Mac with the RX on USB does not get a separate “Link” HID usage for that key.
-- **Bluetooth-only mode.** No receiver HID, so no button events.
-- **Remapping someone else’s volume keys.** The tap only swallows a media-key that arrived within 350 ms of a DJI HID event.
+## How to rebuild and test (Brhyt Handy)
 
-## How to verify which button you have
-
-With the receiver plugged in:
+From `/Users/gi1bertorey/Sites/brhyt-Handy` on the same branch (`cursor/dji-mic-2-trigger-6c01`):
 
 ```bash
-hidutil list | grep -i -A2 -B2 "Wireless Mic"
-```
+git pull
+bun install
+# optional VAD model, once:
+mkdir -p src-tauri/resources/models
+curl -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.computer/silero_vad_v4.onnx
 
-You want a device whose Vendor ID is `0x2ca3` (11427) and whose name looks like `Wireless Mic Rx` or `Wireless Microphone RX`. Product ID is often `0x4008` or `0x4011`; other IDs can still work.
+bun run tauri dev
+# or a local .app:
+bun run tauri build
+```
 
 Then:
 
-1. Enable **DJI Mic button** in Handy.
-2. Enable Handy’s debug logging (or watch the log directory from Settings).
-3. Press the **receiver** button once. A log line `DJI mic trigger: HID vendor=0x2ca3 …` and the settings status `Receiver button seen` mean that button is the working one.
-4. Press the **transmitter Link** button. If the same HID line appears, that TX press is forwarded and will start/stop Handy. If nothing is logged, that TX button cannot be observed on this Mac — use the receiver button.
+1. Plug in the USB receiver. Confirm `hidutil list` still shows Vendor `0x2ca3` Product `0x4008` “Wireless Microphone RX”.
+2. Enable **DJI Mic button**. Status must switch to **USB receiver present** without pressing anything.
+3. With Handy **off** (control): short-press Link — system volume should still bump. That proves the HID→media-key path.
+4. With Handy **on**: short-press Link. Expect a log line `DJI mic trigger: media SoundUp … attributed=true` and/or `DJI mic trigger: HID …`. Status → **Link/volume HID seen**. Dictation should start. TX audio should keep reaching the Mac.
+5. Confirm MacBook volume keys still change volume and do not toggle Handy.
+6. Hold Link only if you intend to pair — that is not the Handy gesture.
 
 Optional environment overrides (Handy process):
 
 ```bash
-DJI_VENDOR_ID=0x2ca3 DJI_PRODUCT_ID=0x4011 /Applications/Handy.app/Contents/MacOS/Handy
+DJI_VENDOR_ID=0x2ca3 DJI_PRODUCT_ID=0x4008 /Applications/Brhyt\ Handy.app/Contents/MacOS/Handy
+# Disable the sourceless-volume fallback if laptop volume keys are stolen:
+DJI_VOLUME_FALLBACK=0
 ```
-
-`DJI_PRODUCT_ID` restricts matching to one product. Leave it unset unless you are debugging a specific receiver.
 
 ## Permissions
 
@@ -98,12 +106,12 @@ DJI_VENDOR_ID=0x2ca3 DJI_PRODUCT_ID=0x4011 /Applications/Handy.app/Contents/MacO
 | Accessibility    | Paste the transcript (existing). Also required for the media-key tap.                                          |
 | Input Monitoring | Read the system-defined media-key stream so Handy can swallow DJI volume without touching keyboard volume keys |
 
-If Input Monitoring is denied, dictation can still start from the HID listener; the DJI button may change volume.
+If Input Monitoring is denied, dictation can still start from a HID pulse; Link may change volume.
 
 ## Related third-party approaches
 
-These were used as research only. This fork calls Handy’s coordinator directly instead of synthesizing `fn+F18` or remapping to Right Command.
+Research only. This fork calls Handy’s coordinator directly instead of synthesizing `fn+F18` or remapping to Right Command.
 
-- [drpedapati/handy-dji-mic-trigger](https://github.com/drpedapati/handy-dji-mic-trigger) — LaunchAgent + `IOHIDManager` + `CGEventTap` → `fn+F18`
+- [drpedapati/handy-dji-mic-trigger](https://github.com/drpedapati/handy-dji-mic-trigger) — LaunchAgent + `IOHIDManager` + `CGEventTap` → `fn+F18` (also requires a HID value unless `REQUIRE_DJI_HID_EVENT=0`)
 - [hueyluox/dji-mic-command](https://github.com/hueyluox/dji-mic-command) — `hidutil` maps RX connecting key (volume HID, PID `0x4011`) to Right Command
 - [caezium/dji-mic-wispr-flow](https://github.com/caezium/dji-mic-wispr-flow) — Karabiner maps Mic Mini 2 TX linking → RX USB volume HID to Wispr Flow
