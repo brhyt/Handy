@@ -389,11 +389,13 @@
       },
       "customWords": {
         "title": "Custom Words",
-        "description": "Help supported models recognize names and specialized terms. Fuzzy correction is currently limited to words using A–Z and numbers.",
-        "placeholder": "Add a word",
+        "description": "Map how a word is spoken or commonly misheard to how it should be written. Supported models also receive the written form as a vocabulary hint. Fuzzy matching is limited to A–Z and numbers.",
+        "spokenPlaceholder": "Heard as",
+        "writtenPlaceholder": "Write as",
         "add": "Add",
         "remove": "Remove {{word}}",
-        "duplicate": "\"{{word}}\" already exists"
+        "duplicate": "\"{{word}}\" already exists",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "Voice Activity Detection",

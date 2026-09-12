@@ -390,10 +390,12 @@
       "customWords": {
         "title": "Mots personnalisés",
         "description": "Aidez les modèles compatibles à reconnaître les noms et les termes spécialisés. La correction approximative est actuellement limitée aux mots utilisant les lettres A à Z et des chiffres.",
-        "placeholder": "Ajouter un mot",
+        "spokenPlaceholder": "Entendu comme",
+        "writtenPlaceholder": "Écrire comme",
         "add": "Ajouter",
         "remove": "Supprimer {{word}}",
-        "duplicate": "\"{{word}}\" existe déjà"
+        "duplicate": "\"{{word}}\" existe déjà",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "Détection d'activité vocale (VAD)",

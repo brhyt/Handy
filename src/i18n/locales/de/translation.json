@@ -390,10 +390,12 @@
       "customWords": {
         "title": "Benutzerdefinierte Wörter",
         "description": "Hilf unterstützten Modellen, Namen und Fachbegriffe zu erkennen. Die unscharfe Korrektur ist derzeit auf Wörter mit den Buchstaben A–Z und Zahlen beschränkt.",
-        "placeholder": "Wort hinzufügen",
+        "spokenPlaceholder": "Gehört als",
+        "writtenPlaceholder": "Schreiben als",
         "add": "Hinzufügen",
         "remove": "{{word}} entfernen",
-        "duplicate": "\"{{word}}\" existiert bereits"
+        "duplicate": "\"{{word}}\" existiert bereits",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "Sprachaktivitätserkennung (VAD)",

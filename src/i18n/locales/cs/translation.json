@@ -390,10 +390,12 @@
       "customWords": {
         "title": "Vlastní slova",
         "description": "Pomozte podporovaným modelům rozpoznávat jména a odborné termíny. Přibližné opravy jsou v současnosti omezeny na slova obsahující písmena A–Z a číslice.",
-        "placeholder": "Přidat slovo",
+        "spokenPlaceholder": "Slyšeno jako",
+        "writtenPlaceholder": "Psát jako",
         "add": "Přidat",
         "remove": "Odebrat {{word}}",
-        "duplicate": "\"{{word}}\" již existuje"
+        "duplicate": "\"{{word}}\" již existuje",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "Detekce hlasové aktivity",

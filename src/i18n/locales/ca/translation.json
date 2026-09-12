@@ -390,10 +390,12 @@
       "customWords": {
         "title": "Paraules personalitzades",
         "description": "Ajudeu els models compatibles a reconèixer noms i termes especialitzats. Actualment, la correcció per similitu es limita a paraules amb lletres de la A a la Z i números.",
-        "placeholder": "Afegiu una paraula",
+        "spokenPlaceholder": "S'escolta com",
+        "writtenPlaceholder": "S'escriu com",
         "add": "Afegiu",
         "remove": "Suprimiu {{word}}",
-        "duplicate": "«{{word}}» ja existeix"
+        "duplicate": "«{{word}}» ja existeix",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "Detecció d'activitat de veu",
