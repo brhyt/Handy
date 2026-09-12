@@ -571,6 +571,10 @@ pub struct AppSettings {
     /// `overlay_position` (position `none` → style `None`).
     #[serde(default = "default_overlay_style")]
     pub overlay_style: OverlayStyle,
+    /// macOS: treat the DJI wireless receiver's USB consumer-control button
+    /// (volume increment/decrement) as a Handy transcription trigger.
+    #[serde(default)]
+    pub dji_mic_trigger_enabled: bool,
 }
 
 fn default_model() -> String {
@@ -1027,6 +1031,7 @@ pub fn get_default_settings() -> AppSettings {
         vad_enabled: default_vad_enabled(),
         vad_backend: VadBackend::default(),
         overlay_style: default_overlay_style(),
+        dji_mic_trigger_enabled: false,
     }
 }
 
@@ -1710,6 +1715,11 @@ mod tests {
             settings.shortcut_activation,
             ShortcutActivation::HoldOrToggle
         );
+    }
+
+    #[test]
+    fn dji_mic_trigger_defaults_to_off() {
+        assert!(!get_default_settings().dji_mic_trigger_enabled);
     }
 
     #[test]

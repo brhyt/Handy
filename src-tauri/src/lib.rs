@@ -8,6 +8,7 @@ mod catalog;
 pub mod cli;
 mod clipboard;
 mod commands;
+mod dji_mic_trigger;
 mod helpers;
 mod input;
 mod llm_client;
@@ -366,6 +367,11 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     // tauri-plugin-autostart elsewhere)
     autostart::apply_autostart(app_handle, settings.autostart_enabled);
 
+    // Optional macOS DJI receiver-button trigger. The coordinator is already
+    // managed before this function runs, so HID edges can toggle recording.
+    app_handle.manage(dji_mic_trigger::DjiMicTriggerState::default());
+    dji_mic_trigger::sync_enabled(app_handle);
+
     // Create the recording overlay window (hidden by default)
     utils::create_recording_overlay(app_handle);
 }
@@ -690,6 +696,8 @@ pub fn run(cli_args: CliArgs) {
             shortcut::suspend_all_bindings,
             shortcut::resume_all_bindings,
             shortcut::change_mute_while_recording_setting,
+            dji_mic_trigger::change_dji_mic_trigger_enabled_setting,
+            dji_mic_trigger::get_dji_mic_trigger_status,
             shortcut::change_append_trailing_space_setting,
             shortcut::change_lazy_stream_close_setting,
             shortcut::change_vad_enabled_setting,

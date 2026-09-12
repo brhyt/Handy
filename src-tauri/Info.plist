@@ -4,5 +4,7 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Request microphone access to transcribe audio locally</string>
+  <key>NSInputMonitoringUsageDescription</key>
+  <string>Brhyt Handy watches the DJI Mic receiver button so it can start and stop dictation without changing your system volume. Keyboard volume keys are not remapped.</string>
 </dict>
 </plist>
