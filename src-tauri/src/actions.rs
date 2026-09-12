@@ -7,6 +7,10 @@ use crate::managers::history::HistoryManager;
 use crate::managers::model::ModelManager;
 use crate::managers::transcription::StreamWorkKind;
 use crate::managers::transcription::TranscriptionManager;
+use crate::prompt_mode::{
+    emit_post_process_fallback, persist_sticky_if_changed, post_process_is_configured,
+    resolve_spoken_mode, PostProcessFallbackReason,
+};
 use crate::settings::{get_settings, AppSettings, OverlayStyle, APPLE_INTELLIGENCE_PROVIDER_ID};
 use crate::shortcut;
 use crate::tray::{set_tray_state, TrayIconState};
@@ -394,8 +398,11 @@ async fn maybe_convert_chinese_variant(
 
 pub(crate) struct ProcessedTranscription {
     pub final_text: String,
+    /// Cue-stripped transcript before LLM rewrite (and before OpenCC).
+    pub transcription_text: String,
     pub post_processed_text: Option<String>,
     pub post_process_prompt: Option<String>,
+    pub post_process_requested: bool,
 }
 
 /// Resolve the persisted language *intent* into the language the currently-loaded
@@ -425,21 +432,26 @@ pub(crate) async fn process_transcription_output(
     post_process: bool,
 ) -> ProcessedTranscription {
     let settings = get_settings(app);
-    let mut final_text = transcription.to_string();
+    let resolution = resolve_spoken_mode(transcription, post_process, &settings);
+    persist_sticky_if_changed(app, &resolution);
+
+    let transcription_text = resolution.text.clone();
+    let mut final_text = resolution.text;
     let mut post_processed_text: Option<String> = None;
     let mut post_process_prompt: Option<String> = None;
+    let should_post_process = resolution.post_process;
 
     // Resolve the language the transcription actually ran in (the persisted
     // intent coerced against the loaded model's capabilities) so OpenCC keys off
     // the effective language rather than a possibly-stale intent.
     let effective_language = resolve_effective_language(app, &settings);
     if let Some(converted_text) =
-        maybe_convert_chinese_variant(&effective_language, transcription).await
+        maybe_convert_chinese_variant(&effective_language, &final_text).await
     {
         final_text = converted_text;
     }
 
-    if post_process {
+    if should_post_process {
         if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
@@ -453,15 +465,30 @@ pub(crate) async fn process_transcription_output(
                     post_process_prompt = Some(prompt.prompt.clone());
                 }
             }
+        } else if !is_blank_transcription(&final_text) {
+            let reason = if post_process_is_configured(&settings) {
+                warn!(
+                    "Post-processing was requested but failed; falling back to verbatim transcription"
+                );
+                PostProcessFallbackReason::Failed
+            } else {
+                warn!(
+                    "Post-processing was requested but is not configured; falling back to verbatim transcription"
+                );
+                PostProcessFallbackReason::NotConfigured
+            };
+            emit_post_process_fallback(app, reason);
         }
-    } else if final_text != transcription {
+    } else if final_text != transcription_text {
         post_processed_text = Some(final_text.clone());
     }
 
     ProcessedTranscription {
         final_text,
+        transcription_text,
         post_processed_text,
         post_process_prompt,
+        post_process_requested: should_post_process,
     }
 }
 
@@ -767,7 +794,12 @@ impl ShortcutAction for TranscribeAction {
                                 utils::redact_text(&transcription)
                             );
 
-                            if post_process {
+                            let preview = resolve_spoken_mode(
+                                &transcription,
+                                post_process,
+                                &get_settings(&ah),
+                            );
+                            if preview.post_process {
                                 if use_streaming_overlay {
                                     tm.emit_stream_working(StreamWorkKind::Polishing);
                                 } else {
@@ -797,8 +829,8 @@ impl ShortcutAction for TranscribeAction {
                             if wav_saved {
                                 if let Err(err) = hm.save_entry(
                                     file_name,
-                                    transcription,
-                                    post_process,
+                                    processed.transcription_text.clone(),
+                                    processed.post_process_requested,
                                     processed.post_processed_text.clone(),
                                     processed.post_process_prompt.clone(),
                                 ) {
