@@ -138,7 +138,8 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         .cloned()
         .unwrap_or_default();
 
-    if model.trim().is_empty() {
+    // CLI harnesses use the official tool's default model when unset.
+    if model.trim().is_empty() && !provider.is_cli() {
         debug!(
             "Post-processing skipped because provider '{}' has no model configured",
             provider.id
@@ -174,16 +175,63 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         return None;
     }
 
-    debug!(
-        "Starting LLM post-processing with provider '{}' (model: {})",
-        provider.id, model
-    );
-
     let api_key = settings
         .post_process_api_keys
         .get(&provider.id)
         .cloned()
         .unwrap_or_default();
+
+    if provider.is_cli() {
+        let processed_prompt = crate::cli_harness::build_cli_prompt(&prompt, transcription);
+        debug!(
+            "Starting CLI post-processing with provider '{}' (model: {})",
+            provider.id,
+            if model.trim().is_empty() {
+                "cli-default"
+            } else {
+                model.trim()
+            }
+        );
+        let cli_settings = settings.post_process_cli_settings(&provider.id);
+        return match crate::cli_harness::rewrite_transcription(
+            &provider.id,
+            &cli_settings,
+            &model,
+            &processed_prompt,
+        )
+        .await
+        {
+            Ok(content) => {
+                let content = strip_invisible_chars(strip_think_block(&content));
+                if content.trim().is_empty() {
+                    error!(
+                        "CLI post-processing for provider '{}' returned empty text; falling back to original transcription",
+                        provider.id
+                    );
+                    None
+                } else {
+                    debug!(
+                        "CLI post-processing succeeded for provider '{}'. Output length: {} chars",
+                        provider.id,
+                        content.len()
+                    );
+                    Some(content)
+                }
+            }
+            Err(err) => {
+                error!(
+                    "CLI post-processing failed for provider '{}': {}. Falling back to original transcription.",
+                    provider.id, err
+                );
+                None
+            }
+        };
+    }
+
+    debug!(
+        "Starting LLM post-processing with provider '{}' (model: {})",
+        provider.id, model
+    );
 
     // Ask these providers to skip reasoning/thinking — post-processing rarely
     // benefits from it and it adds seconds of latency. llm_client picks the
