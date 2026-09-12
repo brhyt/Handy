@@ -5,7 +5,7 @@
 //! stripped and the selected post-process prompt runs. A verbatim cue forces
 //! the opposite, including clearing a sticky arm.
 
-use crate::settings::AppSettings;
+use crate::settings::{AppSettings, PostProcessProvider};
 use log::debug;
 use natural::phonetics::soundex;
 use strsim::levenshtein;
@@ -126,6 +126,9 @@ pub fn emit_post_process_fallback(app: &AppHandle, reason: PostProcessFallbackRe
 /// True when a selected provider, model, and prompt are ready for an LLM call.
 /// An empty API key is allowed (local custom endpoints); the request itself
 /// still fails closed to verbatim if the provider rejects it.
+///
+/// CLI harness providers (Grok / Claude / Codex) intentionally leave the
+/// model empty to mean "CLI default" — same rule as `post_process_transcription`.
 pub fn post_process_is_configured(settings: &AppSettings) -> bool {
     let Some(provider) = settings.active_post_process_provider() else {
         return false;
@@ -136,7 +139,8 @@ pub fn post_process_is_configured(settings: &AppSettings) -> bool {
         .get(&provider.id)
         .map(|m| m.trim())
         .unwrap_or("");
-    if model.is_empty() {
+    // API providers still need a model. CLI harnesses use the tool default.
+    if model.is_empty() && !provider.is_cli() {
         return false;
     }
 
@@ -147,6 +151,21 @@ pub fn post_process_is_configured(settings: &AppSettings) -> bool {
         .post_process_prompts
         .iter()
         .any(|prompt| &prompt.id == prompt_id && !prompt.prompt.trim().is_empty())
+}
+
+/// Same IDs as `cli_harness::is_cli_provider`. An inherent
+/// `PostProcessProvider::is_cli` (CLI-harness PR) is preferred when both exist.
+trait CliProvider {
+    fn is_cli(&self) -> bool;
+}
+
+impl CliProvider for PostProcessProvider {
+    fn is_cli(&self) -> bool {
+        matches!(
+            self.id.as_str(),
+            "claude_code_cli" | "codex_cli" | "grok_cli"
+        )
+    }
 }
 
 fn match_leading_cue(
@@ -299,7 +318,34 @@ fn keys_match(candidate: &str, cue: &str, threshold: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::AppSettings;
+    use crate::settings::{AppSettings, LLMPrompt, PostProcessProvider};
+    use std::collections::HashMap;
+
+    fn provider(id: &str) -> PostProcessProvider {
+        PostProcessProvider {
+            id: id.to_string(),
+            label: id.to_string(),
+            base_url: String::new(),
+            allow_base_url_edit: false,
+            models_endpoint: None,
+            supports_structured_output: false,
+        }
+    }
+
+    fn settings_for_provider(provider_id: &str, model: &str) -> AppSettings {
+        AppSettings {
+            post_process_provider_id: provider_id.to_string(),
+            post_process_providers: vec![provider(provider_id)],
+            post_process_models: HashMap::from([(provider_id.to_string(), model.to_string())]),
+            post_process_prompts: vec![LLMPrompt {
+                id: "rewrite".into(),
+                name: "Rewrite".into(),
+                prompt: "Rewrite ${output}".into(),
+            }],
+            post_process_selected_prompt_id: Some("rewrite".into()),
+            ..Default::default()
+        }
+    }
 
     fn settings_with_cues() -> AppSettings {
         AppSettings {
@@ -448,5 +494,38 @@ mod tests {
         let resolved = resolve_spoken_mode("prompt mode hello", false, &settings);
         assert_eq!(resolved.text, "hello");
         assert_eq!(resolved.cue, Some(SpokenModeCue::Prompt));
+    }
+
+    #[test]
+    fn cli_provider_with_empty_model_is_configured() {
+        let settings = settings_for_provider("grok_cli", "");
+        assert!(
+            settings.active_post_process_provider().unwrap().is_cli(),
+            "Grok CLI must be treated as a CLI harness provider"
+        );
+        assert!(
+            post_process_is_configured(&settings),
+            "empty model is the CLI default and must not look unconfigured"
+        );
+    }
+
+    #[test]
+    fn api_provider_with_empty_model_is_not_configured() {
+        let settings = settings_for_provider("openai", "");
+        assert!(!settings.active_post_process_provider().unwrap().is_cli());
+        assert!(!post_process_is_configured(&settings));
+    }
+
+    #[test]
+    fn api_provider_with_model_and_prompt_is_configured() {
+        let settings = settings_for_provider("openai", "gpt-4o-mini");
+        assert!(post_process_is_configured(&settings));
+    }
+
+    #[test]
+    fn cli_provider_still_requires_a_selected_prompt() {
+        let mut settings = settings_for_provider("grok_cli", "");
+        settings.post_process_selected_prompt_id = None;
+        assert!(!post_process_is_configured(&settings));
     }
 }
