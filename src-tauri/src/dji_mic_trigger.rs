@@ -675,15 +675,13 @@ mod macos {
     }
 
     fn matching_dict(pairs: &[(&'static str, u32)]) -> CFDictionary {
+        // core-foundation 0.10 defaults CFDictionary to<*const c_void,*const c_void>;
+        // build typed pairs then convert to untyped for IOKit.
         let owned: Vec<(CFString, CFNumber)> = pairs
             .iter()
             .map(|(key, value)| (CFString::from_static_string(key), hid_s32(*value)))
             .collect();
-        let refs: Vec<(CFType, CFType)> = owned
-            .iter()
-            .map(|(k, v)| (k.as_CFType(), v.as_CFType()))
-            .collect();
-        CFDictionary::from_CFType_pairs(&refs)
+        CFDictionary::from_CFType_pairs(&owned).to_untyped()
     }
 
     fn open_hid_manager(shared: &Shared) -> Option<HidManager> {
