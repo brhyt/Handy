@@ -1,8 +1,20 @@
 import { useCallback, useMemo, useState } from "react";
 import { useSettings } from "../../../hooks/useSettings";
-import { commands, type PostProcessProvider } from "@/bindings";
+import {
+  commands,
+  type CliHarnessStatus,
+  type PostProcessProvider,
+} from "@/bindings";
 import type { ModelOption } from "./types";
 import type { DropdownOption } from "../../ui/Dropdown";
+
+const APPLE_PROVIDER_ID = "apple_intelligence";
+const CLI_PROVIDER_IDS = ["claude_code_cli", "codex_cli", "grok_cli"];
+
+const isCliProviderId = (providerId: string | undefined): boolean => {
+  if (!providerId) return false;
+  return CLI_PROVIDER_IDS.includes(providerId);
+};
 
 type PostProcessProviderState = {
   providerOptions: DropdownOption[];
@@ -10,6 +22,7 @@ type PostProcessProviderState = {
   selectedProvider: PostProcessProvider | undefined;
   isCustomProvider: boolean;
   isAppleProvider: boolean;
+  isCliProvider: boolean;
   appleIntelligenceUnavailable: boolean;
   baseUrl: string;
   handleBaseUrlChange: (value: string) => void;
@@ -22,13 +35,23 @@ type PostProcessProviderState = {
   modelOptions: ModelOption[];
   isModelUpdating: boolean;
   isFetchingModels: boolean;
+  cliBinaryPath: string;
+  cliConfigDir: string;
+  cliTimeoutSecs: number;
+  handleCliBinaryPathChange: (value: string) => void;
+  handleCliConfigDirChange: (value: string) => void;
+  handleCliTimeoutChange: (value: number) => void;
+  isCliBinaryUpdating: boolean;
+  isCliConfigDirUpdating: boolean;
+  isCliTimeoutUpdating: boolean;
+  cliStatus: CliHarnessStatus | null;
+  isCliStatusChecking: boolean;
+  handleCheckCliStatus: () => void;
   handleProviderSelect: (providerId: string) => void;
   handleModelSelect: (value: string) => void;
   handleModelCreate: (value: string) => void;
   handleRefreshModels: () => void;
 };
-
-const APPLE_PROVIDER_ID = "apple_intelligence";
 
 export const usePostProcessProviderState = (): PostProcessProviderState => {
   const {
@@ -38,6 +61,9 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     updatePostProcessBaseUrl,
     updatePostProcessApiKey,
     updatePostProcessModel,
+    updatePostProcessCliBinary,
+    updatePostProcessCliConfigDir,
+    updatePostProcessCliTimeout,
     fetchPostProcessModels,
     postProcessModelOptions,
   } = useSettings();
@@ -57,13 +83,21 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
   }, [providers, selectedProviderId]);
 
   const isAppleProvider = selectedProvider?.id === APPLE_PROVIDER_ID;
+  const isCliProvider =
+    selectedProvider?.kind === "cli" || isCliProviderId(selectedProvider?.id);
   const [appleIntelligenceUnavailable, setAppleIntelligenceUnavailable] =
     useState(false);
+  const [cliStatus, setCliStatus] = useState<CliHarnessStatus | null>(null);
+  const [isCliStatusChecking, setIsCliStatusChecking] = useState(false);
 
   // Use settings directly as single source of truth
   const baseUrl = selectedProvider?.base_url ?? "";
   const apiKey = settings?.post_process_api_keys?.[selectedProviderId] ?? "";
   const model = settings?.post_process_models?.[selectedProviderId] ?? "";
+  const cliSettings = settings?.post_process_cli?.[selectedProviderId];
+  const cliBinaryPath = cliSettings?.binary_path ?? "";
+  const cliConfigDir = cliSettings?.config_dir ?? "";
+  const cliTimeoutSecs = cliSettings?.timeout_secs ?? 90;
 
   const providerOptions = useMemo<DropdownOption[]>(() => {
     return providers.map((provider) => ({
@@ -72,10 +106,46 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     }));
   }, [providers]);
 
+  const probeCliProvider = useCallback(async (providerId: string) => {
+    setIsCliStatusChecking(true);
+    try {
+      const result = await commands.probePostProcessCli(providerId);
+      if (result.status === "ok") {
+        setCliStatus(result.data);
+      } else {
+        setCliStatus({
+          provider_id: providerId,
+          binary_name: "",
+          resolved_binary: null,
+          binary_found: false,
+          logged_in: null,
+          message: result.error,
+          login_hint: "",
+        });
+      }
+    } catch (error) {
+      setCliStatus({
+        provider_id: providerId,
+        binary_name: "",
+        resolved_binary: null,
+        binary_found: false,
+        logged_in: null,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to check CLI status.",
+        login_hint: "",
+      });
+    } finally {
+      setIsCliStatusChecking(false);
+    }
+  }, []);
+
   const handleProviderSelect = useCallback(
     async (providerId: string) => {
       // Clear error state on any selection attempt (allows dismissing the error)
       setAppleIntelligenceUnavailable(false);
+      setCliStatus(null);
 
       if (providerId === selectedProviderId) return;
 
@@ -90,6 +160,11 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
       }
 
       await setPostProcessProvider(providerId);
+
+      if (isCliProviderId(providerId)) {
+        void probeCliProvider(providerId);
+        return;
+      }
 
       // Auto-fetch available models for the new provider so the model dropdown
       // reflects what's actually valid. Without this, a stale model value from
@@ -111,6 +186,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
       selectedProviderId,
       setPostProcessProvider,
       fetchPostProcessModels,
+      probeCliProvider,
       providers,
       settings,
     ],
@@ -164,9 +240,49 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
   );
 
   const handleRefreshModels = useCallback(() => {
-    if (isAppleProvider) return;
+    if (isAppleProvider || isCliProvider) return;
     void fetchPostProcessModels(selectedProviderId);
-  }, [fetchPostProcessModels, isAppleProvider, selectedProviderId]);
+  }, [
+    fetchPostProcessModels,
+    isAppleProvider,
+    isCliProvider,
+    selectedProviderId,
+  ]);
+
+  const handleCliBinaryPathChange = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      if (trimmed !== cliBinaryPath) {
+        void updatePostProcessCliBinary(selectedProviderId, trimmed);
+      }
+    },
+    [cliBinaryPath, selectedProviderId, updatePostProcessCliBinary],
+  );
+
+  const handleCliConfigDirChange = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      if (trimmed !== cliConfigDir) {
+        void updatePostProcessCliConfigDir(selectedProviderId, trimmed);
+      }
+    },
+    [cliConfigDir, selectedProviderId, updatePostProcessCliConfigDir],
+  );
+
+  const handleCliTimeoutChange = useCallback(
+    (value: number) => {
+      if (!Number.isFinite(value) || value === cliTimeoutSecs) {
+        return;
+      }
+      void updatePostProcessCliTimeout(selectedProviderId, value);
+    },
+    [cliTimeoutSecs, selectedProviderId, updatePostProcessCliTimeout],
+  );
+
+  const handleCheckCliStatus = useCallback(() => {
+    if (!isCliProvider) return;
+    void probeCliProvider(selectedProviderId);
+  }, [isCliProvider, probeCliProvider, selectedProviderId]);
 
   const availableModelsRaw = postProcessModelOptions[selectedProviderId] || [];
 
@@ -204,6 +320,15 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
   const isFetchingModels = isUpdating(
     `post_process_models_fetch:${selectedProviderId}`,
   );
+  const isCliBinaryUpdating = isUpdating(
+    `post_process_cli_binary:${selectedProviderId}`,
+  );
+  const isCliConfigDirUpdating = isUpdating(
+    `post_process_cli_config_dir:${selectedProviderId}`,
+  );
+  const isCliTimeoutUpdating = isUpdating(
+    `post_process_cli_timeout:${selectedProviderId}`,
+  );
 
   const isCustomProvider = selectedProvider?.id === "custom";
 
@@ -215,6 +340,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     selectedProvider,
     isCustomProvider,
     isAppleProvider,
+    isCliProvider,
     appleIntelligenceUnavailable,
     baseUrl,
     handleBaseUrlChange,
@@ -227,6 +353,18 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     modelOptions,
     isModelUpdating,
     isFetchingModels,
+    cliBinaryPath,
+    cliConfigDir,
+    cliTimeoutSecs,
+    handleCliBinaryPathChange,
+    handleCliConfigDirChange,
+    handleCliTimeoutChange,
+    isCliBinaryUpdating,
+    isCliConfigDirUpdating,
+    isCliTimeoutUpdating,
+    cliStatus,
+    isCliStatusChecking,
+    handleCheckCliStatus,
     handleProviderSelect,
     handleModelSelect,
     handleModelCreate,

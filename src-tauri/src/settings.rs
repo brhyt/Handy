@@ -151,6 +151,14 @@ impl<'de> Deserialize<'de> for CustomWord {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PostProcessProviderKind {
+    #[default]
+    Api,
+    Cli,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct PostProcessProvider {
     pub id: String,
@@ -162,6 +170,41 @@ pub struct PostProcessProvider {
     pub models_endpoint: Option<String>,
     #[serde(default)]
     pub supports_structured_output: bool,
+    #[serde(default)]
+    pub kind: PostProcessProviderKind,
+}
+
+impl PostProcessProvider {
+    pub fn is_cli(&self) -> bool {
+        self.kind == PostProcessProviderKind::Cli || crate::cli_harness::is_cli_provider(&self.id)
+    }
+}
+
+/// User-editable CLI harness options. These never store credentials — only
+/// optional paths and a timeout. Empty `binary_path` / `config_dir` mean
+/// "use the CLI default (PATH / the tool's own home)".
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct CliHarnessSettings {
+    #[serde(default)]
+    pub binary_path: String,
+    #[serde(default)]
+    pub config_dir: String,
+    #[serde(default = "default_cli_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl Default for CliHarnessSettings {
+    fn default() -> Self {
+        Self {
+            binary_path: String::new(),
+            config_dir: String::new(),
+            timeout_secs: default_cli_timeout_secs(),
+        }
+    }
+}
+
+fn default_cli_timeout_secs() -> u64 {
+    crate::cli_harness::DEFAULT_CLI_TIMEOUT_SECS
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
@@ -510,6 +553,8 @@ pub struct AppSettings {
     pub post_process_api_keys: SecretMap,
     #[serde(default = "default_post_process_models")]
     pub post_process_models: HashMap<String, String>,
+    #[serde(default = "default_post_process_cli")]
+    pub post_process_cli: HashMap<String, CliHarnessSettings>,
     #[serde(default = "default_post_process_prompts")]
     pub post_process_prompts: Vec<LLMPrompt>,
     #[serde(default)]
@@ -708,56 +753,87 @@ fn default_post_process_provider_id() -> String {
     "openai".to_string()
 }
 
+fn api_post_process_provider(
+    id: &str,
+    label: &str,
+    base_url: &str,
+    allow_base_url_edit: bool,
+    models_endpoint: Option<&str>,
+    supports_structured_output: bool,
+) -> PostProcessProvider {
+    PostProcessProvider {
+        id: id.to_string(),
+        label: label.to_string(),
+        base_url: base_url.to_string(),
+        allow_base_url_edit,
+        models_endpoint: models_endpoint.map(str::to_string),
+        supports_structured_output,
+        kind: PostProcessProviderKind::Api,
+    }
+}
+
+fn cli_post_process_provider(id: &str, label: &str, binary: &str) -> PostProcessProvider {
+    PostProcessProvider {
+        id: id.to_string(),
+        label: label.to_string(),
+        base_url: format!("cli://{binary}"),
+        allow_base_url_edit: false,
+        models_endpoint: None,
+        supports_structured_output: true,
+        kind: PostProcessProviderKind::Cli,
+    }
+}
+
 fn default_post_process_providers() -> Vec<PostProcessProvider> {
     let mut providers = vec![
-        PostProcessProvider {
-            id: "openai".to_string(),
-            label: "OpenAI".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-            allow_base_url_edit: false,
-            models_endpoint: Some("/models".to_string()),
-            supports_structured_output: true,
-        },
-        PostProcessProvider {
-            id: "zai".to_string(),
-            label: "Z.AI".to_string(),
-            base_url: "https://api.z.ai/api/paas/v4".to_string(),
-            allow_base_url_edit: false,
-            models_endpoint: Some("/models".to_string()),
-            supports_structured_output: true,
-        },
-        PostProcessProvider {
-            id: "openrouter".to_string(),
-            label: "OpenRouter".to_string(),
-            base_url: "https://openrouter.ai/api/v1".to_string(),
-            allow_base_url_edit: false,
-            models_endpoint: Some("/models".to_string()),
-            supports_structured_output: true,
-        },
-        PostProcessProvider {
-            id: "anthropic".to_string(),
-            label: "Anthropic".to_string(),
-            base_url: "https://api.anthropic.com/v1".to_string(),
-            allow_base_url_edit: false,
-            models_endpoint: Some("/models".to_string()),
-            supports_structured_output: false,
-        },
-        PostProcessProvider {
-            id: "groq".to_string(),
-            label: "Groq".to_string(),
-            base_url: "https://api.groq.com/openai/v1".to_string(),
-            allow_base_url_edit: false,
-            models_endpoint: Some("/models".to_string()),
-            supports_structured_output: false,
-        },
-        PostProcessProvider {
-            id: "cerebras".to_string(),
-            label: "Cerebras".to_string(),
-            base_url: "https://api.cerebras.ai/v1".to_string(),
-            allow_base_url_edit: false,
-            models_endpoint: Some("/models".to_string()),
-            supports_structured_output: true,
-        },
+        api_post_process_provider(
+            "openai",
+            "OpenAI",
+            "https://api.openai.com/v1",
+            false,
+            Some("/models"),
+            true,
+        ),
+        api_post_process_provider(
+            "zai",
+            "Z.AI",
+            "https://api.z.ai/api/paas/v4",
+            false,
+            Some("/models"),
+            true,
+        ),
+        api_post_process_provider(
+            "openrouter",
+            "OpenRouter",
+            "https://openrouter.ai/api/v1",
+            false,
+            Some("/models"),
+            true,
+        ),
+        api_post_process_provider(
+            "anthropic",
+            "Anthropic",
+            "https://api.anthropic.com/v1",
+            false,
+            Some("/models"),
+            false,
+        ),
+        api_post_process_provider(
+            "groq",
+            "Groq",
+            "https://api.groq.com/openai/v1",
+            false,
+            Some("/models"),
+            false,
+        ),
+        api_post_process_provider(
+            "cerebras",
+            "Cerebras",
+            "https://api.cerebras.ai/v1",
+            false,
+            Some("/models"),
+            true,
+        ),
     ];
 
     // Note: We always include Apple Intelligence on macOS ARM64 without checking availability
@@ -766,35 +842,52 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
     // SystemLanguageModel.default during early app initialization causes SIGABRT.
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
-        providers.push(PostProcessProvider {
-            id: APPLE_INTELLIGENCE_PROVIDER_ID.to_string(),
-            label: "Apple Intelligence".to_string(),
-            base_url: "apple-intelligence://local".to_string(),
-            allow_base_url_edit: false,
-            models_endpoint: None,
-            supports_structured_output: true,
-        });
+        providers.push(api_post_process_provider(
+            APPLE_INTELLIGENCE_PROVIDER_ID,
+            "Apple Intelligence",
+            "apple-intelligence://local",
+            false,
+            None,
+            true,
+        ));
     }
 
+    // Official coding CLIs: reuse the user's existing login. No API key.
+    providers.push(cli_post_process_provider(
+        crate::cli_harness::CLAUDE_CODE_CLI_PROVIDER_ID,
+        "Claude Code CLI",
+        "claude",
+    ));
+    providers.push(cli_post_process_provider(
+        crate::cli_harness::CODEX_CLI_PROVIDER_ID,
+        "Codex CLI",
+        "codex",
+    ));
+    providers.push(cli_post_process_provider(
+        crate::cli_harness::GROK_CLI_PROVIDER_ID,
+        "Grok CLI",
+        "grok",
+    ));
+
     // AWS Bedrock via Mantle (OpenAI-compatible endpoint)
-    providers.push(PostProcessProvider {
-        id: "bedrock_mantle".to_string(),
-        label: "AWS Bedrock (Mantle)".to_string(),
-        base_url: "https://bedrock-mantle.us-east-1.api.aws/v1".to_string(),
-        allow_base_url_edit: false,
-        models_endpoint: Some("/models".to_string()),
-        supports_structured_output: true,
-    });
+    providers.push(api_post_process_provider(
+        "bedrock_mantle",
+        "AWS Bedrock (Mantle)",
+        "https://bedrock-mantle.us-east-1.api.aws/v1",
+        false,
+        Some("/models"),
+        true,
+    ));
 
     // Custom provider always comes last
-    providers.push(PostProcessProvider {
-        id: "custom".to_string(),
-        label: "Custom".to_string(),
-        base_url: "http://localhost:11434/v1".to_string(),
-        allow_base_url_edit: true,
-        models_endpoint: Some("/models".to_string()),
-        supports_structured_output: false,
-    });
+    providers.push(api_post_process_provider(
+        "custom",
+        "Custom",
+        "http://localhost:11434/v1",
+        true,
+        Some("/models"),
+        false,
+    ));
 
     providers
 }
@@ -821,6 +914,16 @@ fn default_post_process_models() -> HashMap<String, String> {
             provider.id.clone(),
             default_model_for_provider(&provider.id),
         );
+    }
+    map
+}
+
+fn default_post_process_cli() -> HashMap<String, CliHarnessSettings> {
+    let mut map = HashMap::new();
+    for provider in default_post_process_providers() {
+        if provider.is_cli() {
+            map.insert(provider.id, CliHarnessSettings::default());
+        }
     }
     map
 }
@@ -879,10 +982,24 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
                     existing.supports_structured_output = provider.supports_structured_output;
                     changed = true;
                 }
+                if existing.kind != provider.kind {
+                    existing.kind = provider.kind;
+                    changed = true;
+                }
             }
             None => {
-                // Provider doesn't exist, add it
-                settings.post_process_providers.push(provider.clone());
+                // Keep Custom last when adding bundled providers (CLI harnesses).
+                if let Some(custom_idx) = settings
+                    .post_process_providers
+                    .iter()
+                    .position(|p| p.id == "custom")
+                {
+                    settings
+                        .post_process_providers
+                        .insert(custom_idx, provider.clone());
+                } else {
+                    settings.post_process_providers.push(provider.clone());
+                }
                 changed = true;
             }
         }
@@ -908,6 +1025,13 @@ fn ensure_post_process_defaults(settings: &mut AppSettings) -> bool {
                     .insert(provider.id.clone(), default_model);
                 changed = true;
             }
+        }
+
+        if provider.is_cli() && !settings.post_process_cli.contains_key(&provider.id) {
+            settings
+                .post_process_cli
+                .insert(provider.id.clone(), CliHarnessSettings::default());
+            changed = true;
         }
     }
 
@@ -1007,6 +1131,7 @@ pub fn get_default_settings() -> AppSettings {
         post_process_providers: default_post_process_providers(),
         post_process_api_keys: default_post_process_api_keys(),
         post_process_models: default_post_process_models(),
+        post_process_cli: default_post_process_cli(),
         post_process_prompts: default_post_process_prompts(),
         post_process_selected_prompt_id: None,
         mute_while_recording: false,
@@ -1061,6 +1186,30 @@ impl AppSettings {
         self.post_process_providers
             .iter_mut()
             .find(|provider| provider.id == provider_id)
+    }
+
+    pub fn post_process_cli_settings(&self, provider_id: &str) -> CliHarnessSettings {
+        self.post_process_cli
+            .get(provider_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn post_process_cli_settings_mut(
+        &mut self,
+        provider_id: &str,
+    ) -> Result<&mut CliHarnessSettings, String> {
+        if !self
+            .post_process_providers
+            .iter()
+            .any(|provider| provider.id == provider_id && provider.is_cli())
+        {
+            return Err(format!("CLI provider '{provider_id}' not found"));
+        }
+        Ok(self
+            .post_process_cli
+            .entry(provider_id.to_string())
+            .or_default())
     }
 
     /// Written forms only — Whisper's initial prompt should bias toward the
@@ -1842,5 +1991,32 @@ mod tests {
         let out = format!("{:?}", map);
         assert!(!out.contains("secret"));
         assert!(out.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn ensure_post_process_defaults_adds_cli_harness_providers() {
+        let mut settings = get_default_settings();
+        settings.post_process_providers.retain(|p| !p.is_cli());
+        settings.post_process_cli.clear();
+
+        assert!(ensure_post_process_defaults(&mut settings));
+        for id in [
+            crate::cli_harness::CLAUDE_CODE_CLI_PROVIDER_ID,
+            crate::cli_harness::CODEX_CLI_PROVIDER_ID,
+            crate::cli_harness::GROK_CLI_PROVIDER_ID,
+        ] {
+            let provider = settings
+                .post_process_provider(id)
+                .unwrap_or_else(|| panic!("missing {id}"));
+            assert_eq!(provider.kind, PostProcessProviderKind::Cli);
+            assert!(settings.post_process_cli.contains_key(id));
+        }
+        assert_eq!(
+            settings
+                .post_process_providers
+                .last()
+                .map(|p| p.id.as_str()),
+            Some("custom")
+        );
     }
 }

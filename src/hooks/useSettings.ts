@@ -41,6 +41,18 @@ interface UseSettingsReturn {
     apiKey: string,
   ) => Promise<void>;
   updatePostProcessModel: (providerId: string, model: string) => Promise<void>;
+  updatePostProcessCliBinary: (
+    providerId: string,
+    binaryPath: string,
+  ) => Promise<void>;
+  updatePostProcessCliConfigDir: (
+    providerId: string,
+    configDir: string,
+  ) => Promise<void>;
+  updatePostProcessCliTimeout: (
+    providerId: string,
+    timeoutSecs: number,
+  ) => Promise<void>;
   fetchPostProcessModels: (providerId: string) => Promise<string[]>;
 }
 
@@ -75,6 +87,9 @@ export const useSettings = (): UseSettingsReturn => {
     updatePostProcessBaseUrl: store.updatePostProcessBaseUrl,
     updatePostProcessApiKey: store.updatePostProcessApiKey,
     updatePostProcessModel: store.updatePostProcessModel,
+    updatePostProcessCliBinary: store.updatePostProcessCliBinary,
+    updatePostProcessCliConfigDir: store.updatePostProcessCliConfigDir,
+    updatePostProcessCliTimeout: store.updatePostProcessCliTimeout,
     fetchPostProcessModels: store.fetchPostProcessModels,
   };
 };
