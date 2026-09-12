@@ -390,10 +390,12 @@
       "customWords": {
         "title": "Anpassade ord",
         "description": "Hjälp modeller som stöds att känna igen namn och specialtermer. Ungefärlig korrigering är för närvarande begränsad till ord med bokstäverna A–Z och siffror.",
-        "placeholder": "Lägg till ett ord",
+        "spokenPlaceholder": "Hörs som",
+        "writtenPlaceholder": "Skrivs som",
         "add": "Lägg till",
         "remove": "Ta bort {{word}}",
-        "duplicate": "\"{{word}}\" finns redan"
+        "duplicate": "\"{{word}}\" finns redan",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "Röstaktivitetsdetektering",

@@ -5,7 +5,7 @@ use crate::audio_toolkit::{
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
 use crate::settings::{
-    get_settings, AppSettings, ModelUnloadTimeout, OrtAcceleratorSetting,
+    get_settings, AppSettings, CustomWord, ModelUnloadTimeout, OrtAcceleratorSetting,
     TranscribeAcceleratorSetting,
 };
 use anyhow::Result;
@@ -1139,7 +1139,6 @@ impl TranscriptionManager {
         let filtered = post_process_transcription_text(
             finalized.text,
             &settings,
-            false,
             &finalized.output_language,
             &finalized.supported_languages,
         );
@@ -1302,18 +1301,19 @@ impl TranscriptionManager {
             let transcribe_result = catch_unwind(AssertUnwindSafe(|| -> Result<String> {
                 match &mut engine {
                     LoadedEngine::TranscribeCpp(session) => {
-                        // Custom words become the initial prompt ONLY for models
-                        // that accept one (whisper family). Attaching the
-                        // whisper run extension to a non-whisper arch is rejected
-                        // with INVALID_ARG, so skip it there and let the fuzzy
-                        // post-correction handle custom words instead.
-                        let family = if settings.custom_words.is_empty() || !model_is_whisper {
-                            None
-                        } else {
-                            Some(RunExtension::Whisper(WhisperRunOptions {
-                                initial_prompt: Some(settings.custom_words.join(", ")),
-                                ..Default::default()
-                            }))
+                        // Written custom-word forms become the initial prompt
+                        // ONLY for models that accept one (whisper family).
+                        // Attaching the whisper run extension to a non-whisper
+                        // arch is rejected with INVALID_ARG, so skip it there
+                        // and let the fuzzy post-correction handle remapping.
+                        let family = match settings.custom_words_initial_prompt() {
+                            Some(prompt) if model_is_whisper => {
+                                Some(RunExtension::Whisper(WhisperRunOptions {
+                                    initial_prompt: Some(prompt),
+                                    ..Default::default()
+                                }))
+                            }
+                            _ => None,
                         };
 
                         let run_plan = transcribe_cpp_run_plan(
@@ -1488,18 +1488,12 @@ impl TranscriptionManager {
             (text, output_language, model_languages)
         };
 
-        // Apply fuzzy word correction if custom words are configured — UNLESS the
-        // words were already handed to the model as an initial prompt (whisper
-        // family). We don't pass a prompt to non-whisper models (it requires the
-        // whisper-kind run extension), so they still get fuzzy correction here,
-        // same as the ONNX engines.
-        let filtered_result = post_process_transcription_text(
-            result,
-            &settings,
-            model_is_whisper,
-            &output_language,
-            &model_languages,
-        );
+        // Always apply spoken → written remapping after decode. Whisper still
+        // gets written forms as an initial prompt, but it commonly emits the
+        // spoken/misheard token anyway; skipping this step would leave those
+        // pairs uncorrected. Non-whisper engines never receive a prompt.
+        let filtered_result =
+            post_process_transcription_text(result, &settings, &output_language, &model_languages);
 
         let et = std::time::Instant::now();
         let translation_note = if settings.translate_to_english {
@@ -1769,19 +1763,19 @@ fn transcribe_cpp_run_plan(
 fn post_process_transcription_text(
     raw: String,
     settings: &AppSettings,
-    custom_words_already_prompted: bool,
     output_language: &OutputLanguageEvidence,
     supported_languages: &[String],
 ) -> String {
     fail_open_text_transform(raw, |raw| {
-        let corrected = if !settings.custom_words.is_empty() && !custom_words_already_prompted {
-            apply_custom_words(
-                &raw,
-                &settings.custom_words,
-                settings.word_correction_threshold,
-            )
-        } else {
+        let corrected = if settings.custom_words.is_empty() {
             raw
+        } else {
+            let pairs: Vec<(&str, &str)> = settings
+                .custom_words
+                .iter()
+                .map(CustomWord::as_match_pair)
+                .collect();
+            apply_custom_words(&raw, &pairs, settings.word_correction_threshold)
         };
 
         // Last-resort language evidence: confidence-gated detection from the
@@ -2232,7 +2226,6 @@ mod tests {
         let result = post_process_transcription_text(
             "eu vi um carro".to_string(),
             &settings,
-            false,
             &evidence,
             &supported,
         );
@@ -2274,7 +2267,6 @@ mod tests {
         let result = post_process_transcription_text(
             "um uhm ok".to_string(),
             &settings,
-            false,
             &evidence,
             &languages(&["en", "pt"]),
         );
@@ -2294,7 +2286,6 @@ mod tests {
             "um so the weather forecast said it would probably rain throughout the whole weekend"
                 .to_string(),
             &settings,
-            false,
             &OutputLanguageEvidence::Unknown,
             &languages(&["en", "pt", "es", "de"]),
         );
@@ -2315,7 +2306,6 @@ mod tests {
         let result = post_process_transcription_text(
             "eu vi um carro na rua ontem de manhã quando fui ao mercado".to_string(),
             &settings,
-            false,
             &OutputLanguageEvidence::Unknown,
             &languages(&["en", "pt", "es", "de"]),
         );
@@ -2401,11 +2391,29 @@ mod tests {
         let result = post_process_transcription_text(
             "eu vi um carro".to_string(),
             &settings,
-            false,
             &evidence,
             &supported,
         );
         assert_eq!(result, "eu vi um carro");
+    }
+
+    #[test]
+    fn custom_word_pairs_rewrite_spoken_forms() {
+        let settings = AppSettings {
+            custom_words: vec![CustomWord::pair("bright", "Brhyt")],
+            word_correction_threshold: 0.5,
+            filler_word_removal_enabled: false,
+            ..Default::default()
+        };
+
+        let result = post_process_transcription_text(
+            "hello bright team".to_string(),
+            &settings,
+            &OutputLanguageEvidence::UserSelected("en".to_string()),
+            &languages(&["en"]),
+        );
+
+        assert_eq!(result, "hello Brhyt team");
     }
 
     #[test]

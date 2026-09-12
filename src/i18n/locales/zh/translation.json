@@ -390,10 +390,12 @@
       "customWords": {
         "title": "自定义词汇",
         "description": "帮助受支持的模型识别名称和专业术语。目前，模糊纠错仅适用于使用 A–Z 字母和数字的词语。",
-        "placeholder": "添加词汇",
+        "spokenPlaceholder": "听到的读音",
+        "writtenPlaceholder": "书写形式",
         "add": "添加",
         "remove": "删除 {{word}}",
-        "duplicate": "\"{{word}}\" 已存在"
+        "duplicate": "\"{{word}}\" 已存在",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "语音活动检测",

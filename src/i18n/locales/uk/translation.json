@@ -390,10 +390,12 @@
       "customWords": {
         "title": "Власні слова",
         "description": "Допоможіть підтримуваним моделям розпізнавати імена та спеціалізовані терміни. Нечітке виправлення наразі обмежене словами, що містять літери A–Z і цифри.",
-        "placeholder": "Додати слово",
+        "spokenPlaceholder": "Чується як",
+        "writtenPlaceholder": "Писати як",
         "add": "Додати",
         "remove": "Видалити {{word}}",
-        "duplicate": "\"{{word}}\" вже існує"
+        "duplicate": "\"{{word}}\" вже існує",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "Виявлення голосової активності",

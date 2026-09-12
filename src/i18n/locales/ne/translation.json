@@ -390,10 +390,12 @@
       "customWords": {
         "title": "कस्टम शब्दहरू",
         "description": "समर्थित मोडेलहरूलाई नाम र विशेष शब्दावली चिन्न मद्दत गर्नुहोस्। फजी सुधार हाल A–Z अक्षर र अङ्क प्रयोग भएका शब्दहरूमा मात्र सीमित छ।",
-        "placeholder": "शब्द थप्नुहोस्",
+        "spokenPlaceholder": "सुनिएको रूप",
+        "writtenPlaceholder": "लेख्ने रूप",
         "add": "थप्नुहोस्",
         "remove": "{{word}} हटाउनुहोस्",
-        "duplicate": "\"{{word}}\" पहिले नै छ"
+        "duplicate": "\"{{word}}\" पहिले नै छ",
+        "pairLabel": "{{spoken}} → {{written}}"
       },
       "voiceActivityDetection": {
         "title": "भ्वाइस एक्टिभिटी डिटेक्सन",
