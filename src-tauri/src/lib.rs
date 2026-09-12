@@ -17,6 +17,7 @@ mod memory;
 mod overlay;
 mod paste_tx;
 pub mod portable;
+mod prompt_mode;
 mod secure_input;
 mod settings;
 mod shortcut;
@@ -692,6 +693,10 @@ pub fn run(cli_args: CliArgs) {
             shortcut::update_post_process_prompt,
             shortcut::delete_post_process_prompt,
             shortcut::set_post_process_selected_prompt,
+            shortcut::update_prompt_mode_cues,
+            shortcut::update_verbatim_cues,
+            shortcut::change_prompt_mode_sticky_enabled_setting,
+            shortcut::change_prompt_mode_sticky_armed_setting,
             shortcut::update_custom_words,
             shortcut::suspend_all_bindings,
             shortcut::resume_all_bindings,

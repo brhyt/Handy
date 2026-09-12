@@ -1260,6 +1260,64 @@ pub fn set_post_process_selected_prompt(app: AppHandle, id: String) -> Result<()
     Ok(())
 }
 
+fn sanitize_spoken_cues(cues: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut sanitized = Vec::new();
+    for cue in cues {
+        let trimmed = cue.split_whitespace().collect::<Vec<_>>().join(" ");
+        if trimmed.is_empty() {
+            continue;
+        }
+        let key = trimmed.to_lowercase();
+        if seen.insert(key) {
+            sanitized.push(trimmed);
+        }
+    }
+    sanitized
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn update_prompt_mode_cues(app: AppHandle, cues: Vec<String>) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.prompt_mode_cues = sanitize_spoken_cues(cues);
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn update_verbatim_cues(app: AppHandle, cues: Vec<String>) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.verbatim_cues = sanitize_spoken_cues(cues);
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_prompt_mode_sticky_enabled_setting(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.prompt_mode_sticky_enabled = enabled;
+    if !enabled {
+        settings.prompt_mode_sticky_armed = false;
+    }
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn change_prompt_mode_sticky_armed_setting(app: AppHandle, armed: bool) -> Result<(), String> {
+    let mut settings = settings::get_settings(&app);
+    settings.prompt_mode_sticky_armed = armed;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn change_mute_while_recording_setting(app: AppHandle, enabled: bool) -> Result<(), String> {

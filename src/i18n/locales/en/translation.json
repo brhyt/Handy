@@ -466,6 +466,31 @@
         "cancel": "Cancel",
         "selectToEdit": "Select a prompt above to view and edit its details.",
         "createFirst": "Click 'Create New Prompt' above to create your first post-processing prompt."
+      },
+      "spokenMode": {
+        "title": "Spoken Mode Switch",
+        "add": "Add",
+        "reset": "Reset to defaults",
+        "remove": "Remove {{cue}}",
+        "duplicate": "\"{{cue}}\" is already in the list",
+        "promptCues": {
+          "title": "Prompt-mode cues",
+          "description": "If a dictation starts with one of these phrases, Handy strips the cue and runs the selected post-process prompt. Default dictation and DJI Mic Link stay verbatim without a cue.",
+          "placeholder": "prompt mode"
+        },
+        "verbatimCues": {
+          "title": "Verbatim cues",
+          "description": "If a dictation starts with one of these phrases, Handy strips the cue and keeps the transcript verbatim — even on the post-process shortcut — and clears a sticky arm.",
+          "placeholder": "verbatim"
+        },
+        "sticky": {
+          "title": "Sticky prompt mode",
+          "description": "Saying a prompt-mode cue once keeps later dictations on the selected rewrite prompt until you say a verbatim cue or turn this off."
+        },
+        "armed": {
+          "title": "Prompt rewrite armed",
+          "description": "When armed, the next dictations use the selected post-process prompt even without repeating the cue. Speak a verbatim cue or toggle this off to return to verbatim."
+        }
       }
     },
     "history": {
@@ -698,7 +723,12 @@
     "modelLoadFailedUnknown": "unknown model",
     "pasteFailedTitle": "Failed to Paste Text",
     "pasteFailed": "Text could not be pasted into the active application.",
-    "transcriptionFailedTitle": "Transcription Failed"
+    "transcriptionFailedTitle": "Transcription Failed",
+    "postProcessFallbackTitle": "Post-processing skipped",
+    "postProcessFallbackNotConfigured": "Prompt rewrite isn't configured (provider, model, or prompt). The transcript was pasted verbatim.",
+    "postProcessFallbackFailed": "Prompt rewrite failed. The transcript was pasted verbatim.",
+    "promptModeArmed": "Prompt rewrite armed. Later dictations will use the selected post-process prompt until you say a verbatim cue.",
+    "promptModeDisarmed": "Prompt rewrite off. Dictation is verbatim again."
   },
   "appLanguage": {
     "title": "Application Language",
