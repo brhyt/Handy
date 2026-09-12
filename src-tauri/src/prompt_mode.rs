@@ -131,13 +131,16 @@ pub fn post_process_is_configured(settings: &AppSettings) -> bool {
         return false;
     };
 
-    let model = settings
-        .post_process_models
-        .get(&provider.id)
-        .map(|m| m.trim())
-        .unwrap_or("");
-    if model.is_empty() {
-        return false;
+    // CLI harnesses use the CLI's own default model when unset.
+    if !provider.is_cli() {
+        let model = settings
+            .post_process_models
+            .get(&provider.id)
+            .map(|m| m.trim())
+            .unwrap_or("");
+        if model.is_empty() {
+            return false;
+        }
     }
 
     let Some(prompt_id) = settings.post_process_selected_prompt_id.as_ref() else {
