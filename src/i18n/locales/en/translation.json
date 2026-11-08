@@ -210,15 +210,26 @@
       },
       "djiMicTrigger": {
         "label": "DJI Mic button",
-        "description": "On macOS, start and stop dictation with a short press of DJI Mic 2 transmitter Link. The USB receiver forwards that press as a consumer volume event. Plug the receiver into the Mac. Do not hold Link (pairing) and do not use TX Power (noise reduction) or Rec. Keyboard volume keys stay unchanged. Grant Input Monitoring so Link does not change system volume. Use Toggle or Auto, not Hold. Handy keeps Wireless Microphone RX open while this is on so Link does not re-init USB audio.",
+        "description": "On macOS, start and stop dictation with a short press of DJI Mic 2 transmitter Link. Uses IOHID on the USB receiver (Wireless Microphone RX). Plug the receiver into the Mac. Do not hold Link (pairing) and do not use TX Power (noise reduction) or Rec. Keyboard volume keys stay unchanged. Use Toggle or Auto, not Hold. Handy keeps Wireless Microphone RX open while this is on so Link does not re-init USB audio.",
         "defaultDeviceName": "Wireless Microphone RX",
         "statusButtonSeen": "Link/volume HID seen: {{device}}{{usage}}",
-        "statusReceiverReady": "USB receiver present ({{device}}). Short-press TX Link once to verify. Status updates when Handy sees the volume event.",
+        "statusReceiverReady": "USB receiver present ({{device}}). Short-press TX Link once to verify (HID-only).",
         "statusWaitingReceiver": "Waiting for the USB receiver (Wireless Microphone RX). Plug the receiver into the Mac.",
         "statusRunning": "Link/volume HID seen: {{device}}{{usage}}",
         "statusWaiting": "Waiting for the USB receiver (Wireless Microphone RX). Plug the receiver into the Mac.",
-        "statusNoSwallow": "Trigger is active, but Input Monitoring is not granted — Link may also change system volume.",
+        "statusNoSwallow": "Trigger is active, but Input Monitoring is not granted — Link presses may not be detected. Even with Input Monitoring, system volume may still change (listen-only tap).",
         "statusUnsupported": "DJI Mic button support is only available on macOS."
+      },
+      "airpodsMaxTrigger": {
+        "label": "AirPods Max volume buttons",
+        "description": "On macOS, when AirPods Max are connected, use the stem volume up/down (and mute) buttons to start and stop dictation. Currently inactive: the media-key tap is disabled for app stability until a non-NSEvent solution exists. Setting is kept for a future fix. ANC/Transparency is not remapped.",
+        "defaultDeviceName": "AirPods Max",
+        "statusButtonSeen": "Volume/mute media key seen: {{device}}{{usage}}",
+        "statusMaxReady": "AirPods Max present ({{device}}). Click a stem volume button once to verify.",
+        "statusWaitingMax": "Waiting for AirPods Max. Connect them as an audio device.",
+        "statusNoSwallow": "Trigger is active, but Input Monitoring is not granted — stem presses may not be detected. Even with Input Monitoring, system volume may still change (listen-only tap).",
+        "statusUnsupported": "AirPods Max volume-button support is only available on macOS.",
+        "statusTapDisabled": "Inactive: media-key tap disabled for stability. AirPods Max stem will not fire ({{device}} present status only)."
       }
     },
     "models": {

@@ -181,6 +181,8 @@ const settingUpdaters: {
     commands.changeMuteWhileRecordingSetting(value as boolean),
   dji_mic_trigger_enabled: (value) =>
     commands.changeDjiMicTriggerEnabledSetting(value as boolean),
+  airpods_max_trigger_enabled: (value) =>
+    commands.changeAirpodsMaxTriggerEnabledSetting(value as boolean),
   append_trailing_space: (value) =>
     commands.changeAppendTrailingSpaceSetting(value as boolean),
   log_level: (value) => commands.setLogLevel(value as any),

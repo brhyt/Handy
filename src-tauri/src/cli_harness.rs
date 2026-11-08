@@ -747,7 +747,9 @@ fn strip_code_fence(raw: &str) -> &str {
 
 fn transcription_from_value(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        // Grok (and some CLIs) put schema JSON inside a string `text` field.
+        // Unwrap nested JSON before accepting the raw string.
+        Value::String(text) => string_as_transcription(text),
         Value::Array(items) => items.iter().rev().find_map(transcription_from_value),
         Value::Object(map) => {
             if let Some(structured) = map.get("structured_output") {
@@ -756,9 +758,11 @@ fn transcription_from_value(value: &Value) -> Option<String> {
                 }
             }
             for key in [TRANSCRIPTION_FIELD, "result", "text", "message", "content"] {
-                if let Some(Value::String(text)) = map.get(key) {
-                    if !text.trim().is_empty() {
-                        return Some(text.clone());
+                if let Some(nested) = map.get(key) {
+                    if let Some(text) = transcription_from_value(nested) {
+                        if !text.trim().is_empty() {
+                            return Some(text);
+                        }
                     }
                 }
             }
@@ -766,6 +770,29 @@ fn transcription_from_value(value: &Value) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn string_as_transcription(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Only recurse when the string looks like a JSON object/array that may
+    // itself hold `{transcription}` / `{text}`. Plain prose stays as-is.
+    if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+    {
+        if let Ok(nested) = serde_json::from_str::<Value>(trimmed) {
+            if let Some(inner) = transcription_from_value(&nested) {
+                // Prefer the nested field when it is actual prose, not another
+                // identical JSON blob.
+                if inner.trim() != trimmed {
+                    return Some(inner);
+                }
+            }
+        }
+    }
+    Some(trimmed.to_string())
 }
 
 fn probe_blocking(provider_id: &str, cli_settings: &CliHarnessSettings) -> CliHarnessStatus {
@@ -953,6 +980,22 @@ mod tests {
     fn parse_grok_text_envelope() {
         let raw = r#"{ "text": "From Grok" }"#;
         assert_eq!(parse_rewritten_text(raw).unwrap(), "From Grok");
+    }
+
+    #[test]
+    fn parse_nested_json_string_in_text_field() {
+        // Grok --json-schema often puts schema output inside `text` as a string.
+        let raw = r#"{ "text": "{\"transcription\": \"Plain cleaned line\"}" }"#;
+        assert_eq!(parse_rewritten_text(raw).unwrap(), "Plain cleaned line");
+    }
+
+    #[test]
+    fn parse_top_level_transcription_object_stays_plain() {
+        let raw = r#"{ "transcription": "So I want to confirm CLI like T3." }"#;
+        assert_eq!(
+            parse_rewritten_text(raw).unwrap(),
+            "So I want to confirm CLI like T3."
+        );
     }
 
     #[test]

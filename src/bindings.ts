@@ -418,6 +418,17 @@ async changeDjiMicTriggerEnabledSetting(enabled: boolean) : Promise<Result<null,
 async getDjiMicTriggerStatus() : Promise<DjiMicTriggerStatus> {
     return await TAURI_INVOKE("get_dji_mic_trigger_status");
 },
+async changeAirpodsMaxTriggerEnabledSetting(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_airpods_max_trigger_enabled_setting", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getAirpodsMaxTriggerStatus() : Promise<AirpodsMaxTriggerStatus> {
+    return await TAURI_INVOKE("get_airpods_max_trigger_status");
+},
 async changeAppendTrailingSpaceSetting(enabled: boolean) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_append_trailing_space_setting", { enabled }) };
@@ -1086,6 +1097,12 @@ overlay_style?: OverlayStyle;
  */
 dji_mic_trigger_enabled?: boolean; 
 /**
+ * macOS: when AirPods Max are connected, treat their stem volume/mute
+ * media keys (sourceless AppleUserHID-style) as a Handy transcription
+ * trigger. Opt-in; does not remap MacBook keyboard volume keys.
+ */
+airpods_max_trigger_enabled?: boolean; 
+/**
  * Phrases spoken at the start of a dictation to request the selected
  * post-process prompt (LLM rewrite). Matched case-insensitively with
  * light fuzzy tolerance.
@@ -1108,6 +1125,7 @@ prompt_mode_sticky_enabled?: boolean;
 prompt_mode_sticky_armed?: boolean }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 export type DjiMicTriggerStatus = { supported: boolean; enabled: boolean; listener_running: boolean; volume_swallow_active: boolean; receiver_present: boolean; button_seen: boolean; last_device_name: string | null; last_hid_usage: string | null }
+export type AirpodsMaxTriggerStatus = { supported: boolean; enabled: boolean; listener_running: boolean; volume_swallow_active: boolean; max_present: boolean; button_seen: boolean; last_device_name: string | null; last_hid_usage: string | null }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
 export type AvailableAccelerators = { transcribe: string[]; ort: string[]; gpu_devices: GpuDeviceOption[] }
 export type BindingResponse = { success: boolean; binding: ShortcutBinding | null; error: string | null }

@@ -620,6 +620,11 @@ pub struct AppSettings {
     /// (volume increment/decrement) as a Handy transcription trigger.
     #[serde(default)]
     pub dji_mic_trigger_enabled: bool,
+    /// macOS: when AirPods Max are connected, treat their stem volume/mute
+    /// media keys (sourceless AppleUserHID-style) as a Handy transcription
+    /// trigger. Opt-in; does not remap MacBook keyboard volume keys.
+    #[serde(default)]
+    pub airpods_max_trigger_enabled: bool,
     /// Phrases spoken at the start of a dictation to request the selected
     /// post-process prompt (LLM rewrite). Matched case-insensitively with
     /// light fuzzy tolerance.
@@ -761,7 +766,11 @@ fn default_prompt_mode_cues() -> Vec<String> {
 }
 
 fn default_verbatim_cues() -> Vec<String> {
-    vec!["verbatim".to_string(), "plain mode".to_string()]
+    vec![
+        "verbatim".to_string(),
+        "plain mode".to_string(),
+        "plane mode".to_string(), // common ASR for "plain mode"
+    ]
 }
 
 fn default_prompt_mode_sticky_enabled() -> bool {
@@ -1185,7 +1194,8 @@ pub fn get_default_settings() -> AppSettings {
         vad_enabled: default_vad_enabled(),
         vad_backend: VadBackend::default(),
         overlay_style: default_overlay_style(),
-        dji_mic_trigger_enabled: false,
+        dji_mic_trigger_enabled: true,
+        airpods_max_trigger_enabled: false,
         prompt_mode_cues: default_prompt_mode_cues(),
         verbatim_cues: default_verbatim_cues(),
         prompt_mode_sticky_enabled: default_prompt_mode_sticky_enabled(),
@@ -1910,8 +1920,13 @@ mod tests {
     }
 
     #[test]
-    fn dji_mic_trigger_defaults_to_off() {
-        assert!(!get_default_settings().dji_mic_trigger_enabled);
+    fn dji_mic_trigger_defaults_to_on() {
+        assert!(get_default_settings().dji_mic_trigger_enabled);
+    }
+
+    #[test]
+    fn airpods_max_trigger_defaults_to_off() {
+        assert!(!get_default_settings().airpods_max_trigger_enabled);
     }
 
     #[test]

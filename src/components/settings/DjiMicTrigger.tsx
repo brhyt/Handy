@@ -60,11 +60,6 @@ export const DjiMicTrigger: React.FC<DjiMicTriggerProps> = React.memo(
         statusText = t("settings.general.djiMicTrigger.statusReceiverReady", {
           device,
         });
-        if (status.listener_running && !status.volume_swallow_active) {
-          statusText = `${statusText} ${t("settings.general.djiMicTrigger.statusNoSwallow")}`;
-        }
-      } else if (status.listener_running && !status.volume_swallow_active) {
-        statusText = t("settings.general.djiMicTrigger.statusNoSwallow");
       } else {
         statusText = t("settings.general.djiMicTrigger.statusWaitingReceiver");
       }

@@ -13,6 +13,7 @@ import { VolumeSlider } from "../VolumeSlider";
 import { MuteWhileRecording } from "../MuteWhileRecording";
 import { ModelSettingsCard } from "./ModelSettingsCard";
 import { DjiMicTrigger } from "../DjiMicTrigger";
+import { AirpodsMaxTrigger } from "../AirpodsMaxTrigger";
 
 export const GeneralSettings: React.FC = () => {
   const { t } = useTranslation();
@@ -26,6 +27,7 @@ export const GeneralSettings: React.FC = () => {
         {/* Cancel shortcut remains hidden on Linux because of dynamic shortcut instability. */}
         {!isLinux && <ShortcutInput shortcutId="cancel" grouped={true} />}
         <DjiMicTrigger descriptionMode="tooltip" grouped={true} />
+        <AirpodsMaxTrigger descriptionMode="tooltip" grouped={true} />
       </SettingsGroup>
       <ModelSettingsCard />
       <SettingsGroup title={t("settings.sound.title")}>

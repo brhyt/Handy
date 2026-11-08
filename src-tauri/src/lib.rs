@@ -708,6 +708,8 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_mute_while_recording_setting,
             dji_mic_trigger::change_dji_mic_trigger_enabled_setting,
             dji_mic_trigger::get_dji_mic_trigger_status,
+            dji_mic_trigger::change_airpods_max_trigger_enabled_setting,
+            dji_mic_trigger::get_airpods_max_trigger_status,
             shortcut::change_append_trailing_space_setting,
             shortcut::change_lazy_stream_close_setting,
             shortcut::change_vad_enabled_setting,

@@ -223,7 +223,11 @@ fn strip_leading_cue(text: &str, cue: &str, threshold: f64) -> Option<String> {
 
     if tokens.len() >= cue_tokens.len() {
         let candidate = tokens[..cue_tokens.len()].join(" ");
-        if keys_match(&candidate, cue, threshold) {
+        // Prefer token-wise matching so ASR homophones like "plane"≈"plain"
+        // still hit multi-word cues (whole-phrase levenshtein is too strict).
+        if cue_tokens_match(&tokens[..cue_tokens.len()], &cue_tokens, threshold)
+            || keys_match(&candidate, cue, threshold)
+        {
             return Some(remaining_after_tokens(&tokens, cue_tokens.len()));
         }
     }
@@ -258,6 +262,16 @@ fn normalize_key(text: &str) -> String {
         .collect()
 }
 
+fn cue_tokens_match(candidate_tokens: &[&str], cue_tokens: &[&str], threshold: f64) -> bool {
+    if candidate_tokens.len() != cue_tokens.len() || cue_tokens.is_empty() {
+        return false;
+    }
+    candidate_tokens
+        .iter()
+        .zip(cue_tokens.iter())
+        .all(|(candidate, cue)| keys_match(candidate, cue, threshold))
+}
+
 fn keys_match(candidate: &str, cue: &str, threshold: f64) -> bool {
     let candidate_key = normalize_key(candidate);
     let cue_key = normalize_key(cue);
@@ -287,7 +301,9 @@ fn keys_match(candidate: &str, cue: &str, threshold: f64) -> bool {
     // Soundex on long concatenated keys is coarse (e.g. "promptmodeclean"
     // vs "promptrewrite"). Only boost already-close misses, matching the
     // spirit of custom-word fuzzy matching without swallowing the next word.
-    let phonetic_match = levenshtein_score < 0.35
+    // Gate at 0.45 so common ASR swaps like plane↔plain (edit distance 2
+    // on a 5-letter word → 0.4) still get the soundex boost.
+    let phonetic_match = levenshtein_score <= 0.45
         && candidate_key.chars().all(|c| c.is_ascii_alphabetic())
         && cue_key.chars().all(|c| c.is_ascii_alphabetic())
         && soundex(&candidate_key, &cue_key);
@@ -442,6 +458,22 @@ mod tests {
         assert!(!resolved.post_process);
     }
 
+
+    #[test]
+    fn plane_mode_matches_plain_mode_cue() {
+        let mut settings = settings_with_cues();
+        settings.prompt_mode_sticky_armed = true;
+        let resolved = resolve_spoken_mode(
+            "Plane mode, how this is how I received my prompt",
+            false,
+            &settings,
+        );
+        assert_eq!(resolved.cue, Some(SpokenModeCue::Verbatim));
+        assert!(!resolved.post_process);
+        assert!(!resolved.sticky_armed);
+        assert!(resolved.text.starts_with("how this"));
+    }
+
     #[test]
     fn longer_cue_wins_over_shorter_overlap() {
         let settings = AppSettings {
@@ -452,4 +484,5 @@ mod tests {
         assert_eq!(resolved.text, "hello");
         assert_eq!(resolved.cue, Some(SpokenModeCue::Prompt));
     }
+
 }
