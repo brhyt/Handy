@@ -188,6 +188,36 @@ function App() {
     };
   }, [t]);
 
+  useEffect(() => {
+    const unlisten = listen<string>("post-process-fallback", (event) => {
+      toast.warning(t("errors.postProcessFallbackTitle"), {
+        description:
+          event.payload === "not_configured"
+            ? t("errors.postProcessFallbackNotConfigured")
+            : t("errors.postProcessFallbackFailed"),
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
+
+  useEffect(() => {
+    const unlisten = listen<{ armed: boolean }>(
+      "prompt-mode-changed",
+      (event) => {
+        if (event.payload.armed) {
+          toast.info(t("errors.promptModeArmed"));
+        } else {
+          toast.info(t("errors.promptModeDisarmed"));
+        }
+      },
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
+
   // Listen for model loading failures and show a toast
   useEffect(() => {
     const unlisten = listen<ModelStateEvent>("model-state-changed", (event) => {

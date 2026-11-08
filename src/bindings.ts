@@ -304,6 +304,38 @@ async setPostProcessSelectedPrompt(id: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async updatePromptModeCues(cues: string[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_prompt_mode_cues", { cues }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateVerbatimCues(cues: string[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_verbatim_cues", { cues }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async changePromptModeStickyEnabledSetting(enabled: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_prompt_mode_sticky_enabled_setting", { enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async changePromptModeStickyArmedSetting(armed: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_prompt_mode_sticky_armed_setting", { armed }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async updateCustomWords(words: CustomWord[]) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_custom_words", { words }) };
@@ -1020,7 +1052,28 @@ overlay_style?: OverlayStyle;
  * macOS: treat DJI Mic 2 TX Link (short press → RX USB consumer volume)
  * as a Handy transcription trigger.
  */
-dji_mic_trigger_enabled?: boolean }
+dji_mic_trigger_enabled?: boolean; 
+/**
+ * Phrases spoken at the start of a dictation to request the selected
+ * post-process prompt (LLM rewrite). Matched case-insensitively with
+ * light fuzzy tolerance.
+ */
+prompt_mode_cues?: string[]; 
+/**
+ * Phrases spoken at the start of a dictation to force verbatim output
+ * and clear a sticky prompt-mode arm.
+ */
+verbatim_cues?: string[]; 
+/**
+ * When true, a prompt-mode cue arms rewrite for later dictations until
+ * a verbatim cue (or the settings toggle) clears it.
+ */
+prompt_mode_sticky_enabled?: boolean; 
+/**
+ * Runtime sticky-arm state. Persisted so it survives across utterances
+ * and app restarts; the settings UI can clear it.
+ */
+prompt_mode_sticky_armed?: boolean }
 export type AudioDevice = { index: string; name: string; is_default: boolean }
 export type DjiMicTriggerStatus = { supported: boolean; enabled: boolean; listener_running: boolean; volume_swallow_active: boolean; receiver_present: boolean; button_seen: boolean; last_device_name: string | null; last_hid_usage: string | null }
 export type AutoSubmitKey = "enter" | "ctrl_enter" | "cmd_enter"
