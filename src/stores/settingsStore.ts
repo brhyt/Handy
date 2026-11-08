@@ -58,6 +58,18 @@ interface SettingsStore {
     apiKey: string,
   ) => Promise<void>;
   updatePostProcessModel: (providerId: string, model: string) => Promise<void>;
+  updatePostProcessCliBinary: (
+    providerId: string,
+    binaryPath: string,
+  ) => Promise<void>;
+  updatePostProcessCliConfigDir: (
+    providerId: string,
+    configDir: string,
+  ) => Promise<void>;
+  updatePostProcessCliTimeout: (
+    providerId: string,
+    timeoutSecs: number,
+  ) => Promise<void>;
   fetchPostProcessModels: (providerId: string) => Promise<string[]>;
   setPostProcessModelOptions: (providerId: string, models: string[]) => void;
 
@@ -566,6 +578,69 @@ export const useSettingsStore = create<SettingsStore>()(
 
     updatePostProcessModel: async (providerId, model) => {
       return get().updatePostProcessSetting("model", providerId, model);
+    },
+
+    updatePostProcessCliBinary: async (providerId, binaryPath) => {
+      const { setUpdating, refreshSettings } = get();
+      const updateKey = `post_process_cli_binary:${providerId}`;
+      setUpdating(updateKey, true);
+      try {
+        const result = await commands.changePostProcessCliBinarySetting(
+          providerId,
+          binaryPath,
+        );
+        if (result.status === "error") {
+          console.error("Failed to persist CLI binary path:", result.error);
+          return;
+        }
+        await refreshSettings();
+      } catch (error) {
+        console.error("Failed to update CLI binary path:", error);
+      } finally {
+        setUpdating(updateKey, false);
+      }
+    },
+
+    updatePostProcessCliConfigDir: async (providerId, configDir) => {
+      const { setUpdating, refreshSettings } = get();
+      const updateKey = `post_process_cli_config_dir:${providerId}`;
+      setUpdating(updateKey, true);
+      try {
+        const result = await commands.changePostProcessCliConfigDirSetting(
+          providerId,
+          configDir,
+        );
+        if (result.status === "error") {
+          console.error("Failed to persist CLI config dir:", result.error);
+          return;
+        }
+        await refreshSettings();
+      } catch (error) {
+        console.error("Failed to update CLI config dir:", error);
+      } finally {
+        setUpdating(updateKey, false);
+      }
+    },
+
+    updatePostProcessCliTimeout: async (providerId, timeoutSecs) => {
+      const { setUpdating, refreshSettings } = get();
+      const updateKey = `post_process_cli_timeout:${providerId}`;
+      setUpdating(updateKey, true);
+      try {
+        const result = await commands.changePostProcessCliTimeoutSetting(
+          providerId,
+          timeoutSecs,
+        );
+        if (result.status === "error") {
+          console.error("Failed to persist CLI timeout:", result.error);
+          return;
+        }
+        await refreshSettings();
+      } catch (error) {
+        console.error("Failed to update CLI timeout:", error);
+      } finally {
+        setUpdating(updateKey, false);
+      }
     },
 
     fetchPostProcessModels: async (providerId) => {
